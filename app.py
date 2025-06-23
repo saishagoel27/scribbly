@@ -1,5 +1,5 @@
 import streamlit as st
-from utils import extract_text_from_file, get_summary, get_key_phrases, generate_flashcards, get_file_info
+from utils import extract_text_from_file, get_summary, get_key_phrases, generate_flashcards, get_file_info, get_document_intelligence_status
 import time
 
 # Page configuration
@@ -41,6 +41,21 @@ st.markdown("""
         margin: 0.5rem 0;
         border-left: 4px solid #667eea;
     }
+    .doc-intel-status {
+        padding: 0.5rem;
+        border-radius: 5px;
+        margin: 0.5rem 0;
+    }
+    .doc-intel-enabled {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .doc-intel-disabled {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -53,11 +68,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Check Document Intelligence status
+doc_intel_enabled = get_document_intelligence_status()
+
 # Sidebar with instructions
 with st.sidebar:
     st.markdown("### 📋 How to Use Scribbly")
     st.markdown("""
-    1. **Upload** your typed notes (.txt, .docx, .pdf)
+    1. **Upload** your notes (text files or images)
     2. **Preview** the extracted content
     3. **Analyze** with Azure AI
     4. **Review** summaries, key concepts & flashcards
@@ -65,18 +83,53 @@ with st.sidebar:
     """)
     
     st.markdown("### 📄 Supported Formats")
-    st.markdown("""
-    - **TXT**: Plain text files
-    - **DOCX**: Microsoft Word documents  
-    - **PDF**: Portable Document Format
-    """)
+    supported_formats = [
+        "- **TXT**: Plain text files",
+        "- **DOCX**: Microsoft Word documents",
+        "- **PDF**: Portable Document Format"
+    ]
+    
+    if doc_intel_enabled:
+        supported_formats.extend([
+            "- **JPG/JPEG**: Image files with handwritten/printed text",
+            "- **PNG**: Image files with handwritten/printed text",
+            "- **BMP/TIFF**: Image files with handwritten/printed text"
+        ])
+    
+    st.markdown("\n".join(supported_formats))
+    
+    # Document Intelligence status
+    st.markdown("### 🔍 OCR Status")
+    if doc_intel_enabled:
+        st.markdown("""
+        <div class="doc-intel-status doc-intel-enabled">
+            ✅ Document Intelligence: <strong>Enabled</strong><br>
+            📸 You can upload images of handwritten notes!
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="doc-intel-status doc-intel-disabled">
+            ⚠️ Document Intelligence: <strong>Not Configured</strong><br>
+            📝 Only text files supported currently
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("### 💡 Tips")
-    st.markdown("""
-    - Upload detailed notes (50+ characters)
-    - Keep files under 10MB
-    - Well-structured notes produce better results
-    """)
+    tips = [
+        "- Upload detailed notes (50+ characters)",
+        "- Keep text files under 10MB",
+        "- Well-structured notes produce better results"
+    ]
+    
+    if doc_intel_enabled:
+        tips.extend([
+            "- For images: Use clear, well-lit photos",
+            "- Keep image files under 4MB",
+            "- Ensure text is readable and not blurry"
+        ])
+    
+    st.markdown("\n".join(tips))
 
 # Main content area
 col1, col2 = st.columns([2, 1])
@@ -84,10 +137,19 @@ col1, col2 = st.columns([2, 1])
 with col1:
     # File upload section
     st.markdown("### 📤 Upload Your Notes")
+    
+    # Determine allowed file types based on Document Intelligence availability
+    if doc_intel_enabled:
+        file_types = ["txt", "docx", "pdf", "jpg", "jpeg", "png", "bmp", "tiff"]
+        help_text = "Upload your notes as text files (TXT, DOCX, PDF) or images (JPG, PNG, etc.) of handwritten/printed text"
+    else:
+        file_types = ["txt", "docx", "pdf"]
+        help_text = "Upload your typed notes in TXT, DOCX, or PDF format"
+    
     uploaded_file = st.file_uploader(
-        "Choose your handwritten (typed-up) notes file",
-        type=["txt", "docx", "pdf"],
-        help="Upload your typed notes in TXT, DOCX, or PDF format"
+        "Choose your notes file",
+        type=file_types,
+        help=help_text
     )
 
 # File processing
@@ -96,22 +158,48 @@ if uploaded_file:
     with col2:
         st.markdown("### 📊 File Information")
         file_info = get_file_info(uploaded_file)
+        
+        # Add file type indicator
+        filename = uploaded_file.name.lower()
+        if any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']):
+            file_info["processing_type"] = "🔍 OCR (Image to Text)"
+        else:
+            file_info["processing_type"] = "📄 Direct Text Extraction"
+        
         st.json(file_info)
     
+    # Show processing indicator based on file type
+    filename = uploaded_file.name.lower()
+    is_image = any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff'])
+    
+    if is_image:
+        processing_message = "🔍 Processing image with OCR..."
+        if not doc_intel_enabled:
+            st.error("❌ Image processing requires Azure Document Intelligence configuration")
+            st.stop()
+    else:
+        processing_message = "📄 Reading your file..."
+    
     # Extract text with progress indicator
-    with st.spinner("🔍 Reading your file..."):
+    with st.spinner(processing_message):
         result = extract_text_from_file(uploaded_file)
         
         # Handle extraction results
         if isinstance(result, tuple):  # Error case
             text, error = result
             st.error(f"❌ {error}")
+            if is_image and "Document Intelligence not configured" in error:
+                st.info("💡 To process images, add your Azure Document Intelligence credentials to the .env file")
             st.stop()
         else:
             text = result
     
-    # Show success message
-    st.success(f"✅ Successfully processed: {uploaded_file.name}")
+    # Show success message with different text for images
+    if is_image:
+        st.success(f"✅ Successfully extracted text from image: {uploaded_file.name}")
+        st.info("🔍 Text was extracted using Azure Document Intelligence OCR")
+    else:
+        st.success(f"✅ Successfully processed: {uploaded_file.name}")
     
     # Text preview section
     st.markdown("### 👀 Content Preview")
@@ -270,9 +358,10 @@ if uploaded_file:
 
 # Footer
 st.markdown("---")
-st.markdown("""
+st.markdown(f"""
 <div style="text-align: center; color: #666; padding: 2rem;">
     <p>Made with ❤️ using Streamlit and Azure AI</p>
-    <p><small>Scribbly helps students transform their handwritten notes into organized study materials</small></p>
+    <p><small>Scribbly helps students transform their notes into organized study materials</small></p>
+    <p><small>Document Intelligence: {'✅ Enabled' if doc_intel_enabled else '❌ Not Configured'}</small></p>
 </div>
 """, unsafe_allow_html=True)

@@ -2,12 +2,15 @@ import os
 import docx
 import pdfplumber 
 from azure.ai.textanalytics import TextAnalyticsClient
+from azure.ai.formrecognizer import DocumentAnalysisClient
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError, HttpResponseError
 from dotenv import load_dotenv
 import random
 import logging
 import streamlit as st
+from PIL import Image
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,20 +18,38 @@ logger = logging.getLogger(__name__)
 
 # Loading API keys from .env
 load_dotenv()
-endpoint = os.getenv("AZURE_LANGUAGE_ENDPOINT")
-key = os.getenv("AZURE_LANGUAGE_KEY")
+
+# Text Analytics credentials (existing)
+text_endpoint = os.getenv("AZURE_LANGUAGE_ENDPOINT")
+text_key = os.getenv("AZURE_LANGUAGE_KEY")
+
+# Document Intelligence credentials (new)
+doc_intel_endpoint = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
+doc_intel_key = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
 
 # Validate environment variables
-if not endpoint or not key:
-    logger.error("Azure credentials not found in environment variables")
-    st.error("⚠️ Azure credentials not configured. Please check your .env file.")
+if not text_endpoint or not text_key:
+    logger.error("Azure Text Analytics credentials not found in environment variables")
+    st.error("⚠️ Azure Text Analytics credentials not configured. Please check your .env file.")
 
-# Setup Azure client with error handling
+if not doc_intel_endpoint or not doc_intel_key:
+    logger.warning("Azure Document Intelligence credentials not found. Image processing will be limited.")
+
+# Setup Azure clients with error handling
 try:
-    text_client = TextAnalyticsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+    text_client = TextAnalyticsClient(endpoint=text_endpoint, credential=AzureKeyCredential(text_key))
 except Exception as e:
-    logger.error(f"Failed to initialize Azure client: {e}")
+    logger.error(f"Failed to initialize Azure Text Analytics client: {e}")
     text_client = None
+
+try:
+    if doc_intel_endpoint and doc_intel_key:
+        document_client = DocumentAnalysisClient(endpoint=doc_intel_endpoint, credential=AzureKeyCredential(doc_intel_key))
+    else:
+        document_client = None
+except Exception as e:
+    logger.error(f"Failed to initialize Azure Document Intelligence client: {e}")
+    document_client = None
 
 # ----- FILE READERS -----
 def read_txt(file):
@@ -75,21 +96,78 @@ def read_pdf(file):
         logger.error(f"Error reading PDF file: {e}")
         raise Exception(f"Failed to read PDF file: {str(e)}")
 
+def read_image_with_document_intelligence(file):
+    """Extract text from image using Azure Document Intelligence"""
+    if not document_client:
+        raise Exception("Azure Document Intelligence not configured. Please add AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and AZURE_DOCUMENT_INTELLIGENCE_KEY to your .env file.")
+    
+    try:
+        # Reset file pointer
+        file.seek(0)
+        file_bytes = file.read()
+        
+        # Validate image
+        try:
+            img = Image.open(io.BytesIO(file_bytes))
+            img.verify()
+        except Exception:
+            raise Exception("Invalid image file")
+        
+        # Reset file pointer for Document Intelligence
+        file.seek(0)
+        
+        # Use Document Intelligence to analyze the document
+        poller = document_client.begin_analyze_document(
+            "prebuilt-read", document=file_bytes
+        )
+        result = poller.result()
+        
+        # Extract text content
+        text_content = []
+        
+        if result.content:
+            return result.content
+        
+        # Fallback: extract from paragraphs
+        for page in result.pages:
+            for line in page.lines:
+                text_content.append(line.content)
+        
+        extracted_text = "\n".join(text_content)
+        
+        if not extracted_text.strip():
+            raise Exception("No text could be extracted from the image. Make sure the image contains clear, readable text.")
+        
+        return extracted_text
+        
+    except AzureError as e:
+        logger.error(f"Azure Document Intelligence error: {e}")
+        raise Exception(f"Document Intelligence error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error processing image: {e}")
+        raise Exception(f"Image processing failed: {str(e)}")
+
 def extract_text_from_file(file):
     """Extract text from uploaded file based on file extension"""
     try:
         filename = file.name.lower()
         
-        # File size validation (max 10MB)
-        if file.size > 10 * 1024 * 1024:
-            raise Exception("File size too large. Please upload files under 10MB.")
+        # File size validation (max 10MB for regular files, 4MB for images)
+        max_size = 4 * 1024 * 1024 if any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']) else 10 * 1024 * 1024
         
+        if file.size > max_size:
+            max_size_mb = max_size / (1024 * 1024)
+            raise Exception(f"File size too large. Please upload files under {max_size_mb}MB.")
+        
+        # Handle different file types
         if filename.endswith(".txt"):
             return read_txt(file)
         elif filename.endswith(".docx"):
             return read_docx(file)
         elif filename.endswith(".pdf"):
             return read_pdf(file)
+        elif any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']):
+            return read_image_with_document_intelligence(file)
         else:
             raise Exception(f"Unsupported file type: {filename.split('.')[-1]}")
     
@@ -109,7 +187,7 @@ def validate_text_length(text, min_chars=50, max_chars=125000):
 def get_summary(text):
     """Generate summary using Azure Text Analytics key phrases and simple text processing"""
     if not text_client:
-        raise Exception("Azure client not initialized")
+        raise Exception("Azure Text Analytics client not initialized")
     
     try:
         validate_text_length(text)
@@ -167,7 +245,7 @@ def get_summary(text):
 def get_key_phrases(text):
     """Extract key phrases using Azure Text Analytics"""
     if not text_client:
-        raise Exception("Azure client not initialized")
+        raise Exception("Azure Text Analytics client not initialized")
     
     try:
         validate_text_length(text)
@@ -282,3 +360,7 @@ def get_file_info(file):
         "filetype": file.type,
         "filesize": f"{file.size / 1024:.1f} KB"
     }
+
+def get_document_intelligence_status():
+    """Check if Document Intelligence is properly configured"""
+    return document_client is not None
