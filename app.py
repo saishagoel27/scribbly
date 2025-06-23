@@ -117,7 +117,7 @@ with st.sidebar:
     
     st.markdown("### 💡 Tips")
     tips = [
-        "- Upload detailed notes (50+ characters)",
+        "- Upload detailed notes (50000+ characters)",
         "- Keep text files under 10MB",
         "- Well-structured notes produce better results"
     ]
