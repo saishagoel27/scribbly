@@ -1,53 +1,98 @@
-import streamlit as st
+import logging
+import time
+import base64
+from typing import Dict, List, Optional, Tuple, Callable
+import json
+from datetime import datetime
+import io
+
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import AzureError, ResourceNotFoundError
-import logging
-import io
-import base64
-from typing import Dict, List, Optional, Tuple
-from config import config
+from azure.core.exceptions import AzureError, ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
+from config import Config
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AzureDocumentProcessor:
+    """
+    Azure Document Intelligence processor with comprehensive OCR capabilities
+    Following Azure best practices for Document Intelligence API
+    """
+    
     def __init__(self):
+        """Initialize Azure Document Intelligence client"""
         self.client = None
         self.is_available = False
+        self.endpoint = Config.AZURE_DOC_INTELLIGENCE_ENDPOINT
+        self.key = Config.AZURE_DOC_INTELLIGENCE_KEY
+        self.timeout = Config.AZURE_TIMEOUT
+        self.max_retries = 3
+        
         self._initialize_client()
     
-    def _initialize_client(self):
+    def _initialize_client(self) -> None:
+        """Initialize Azure Document Intelligence client with error handling"""
         try:
-            if config.has_document_intelligence():
-                # Updated endpoint format for East US region
-                endpoint = config.doc_intelligence_endpoint
-                logger.info(f"🌍 Initializing for East US endpoint: {endpoint}")
-                
-                self.client = DocumentIntelligenceClient(
-                    endpoint=endpoint,
-                    credential=AzureKeyCredential(config.doc_intelligence_key),
-                    api_version="2024-02-29-preview"  # Updated API version for East US
-                )
-                self.is_available = True
-                logger.info("✅ Azure Document Intelligence initialized for East US region")
-            else:
+            if not self.endpoint or not self.key:
                 logger.warning("❌ Azure Document Intelligence credentials not configured")
                 self.is_available = False
+                return
+            
+            # Validate endpoint format
+            if not self.endpoint.startswith('https://'):
+                logger.error("❌ Invalid Azure endpoint format. Must start with https://")
+                self.is_available = False
+                return
+            
+            # Create client with proper credentials and API version
+            credential = AzureKeyCredential(self.key)
+            self.client = DocumentIntelligenceClient(
+                endpoint=self.endpoint,
+                credential=credential,
+                api_version="2024-02-29-preview"  # Use the same API version as your working code
+            )
+            
+            # Test connection
+            self._test_connection()
+            self.is_available = True
+            logger.info("✅ Azure Document Intelligence client initialized successfully")
+            
         except Exception as e:
             logger.error(f"❌ Failed to initialize Azure Document Intelligence: {e}")
             self.is_available = False
     
-    def extract_text_with_handwriting(self, file_bytes, content_type, progress_callback=None):
+    def _test_connection(self) -> None:
+        """Test Azure connection with minimal validation"""
+        try:
+            # Simple validation - check if client is properly configured
+            if self.client and self.endpoint and self.key:
+                logger.info("🔗 Azure Document Intelligence connection configured")
+            else:
+                raise Exception("Client configuration incomplete")
+        except Exception as e:
+            logger.warning(f"⚠️ Azure connection test failed: {e}")
+            raise
+    
+    def extract_text_with_handwriting(self, 
+                                    file_bytes: bytes, 
+                                    content_type: str, 
+                                    progress_callback: Optional[Callable[[str], None]] = None) -> Dict:
+        """
+        Extract text from documents with handwriting recognition using Azure Document Intelligence
+        Using the same method structure that was working in your previous code
+        """
         if not self.is_available:
-            raise Exception("Azure Document Intelligence service not available")
+            return self._create_fallback_response("Azure Document Intelligence not available")
         
         try:
             if progress_callback:
-                progress_callback("🔍 Analyzing document with East US optimized settings...")
+                progress_callback("🔍 Starting Azure OCR analysis...")
             
-            # METHOD 1: Direct bytes with AnalyzeDocumentRequest (recommended for new SDK)
+            # METHOD 1: AnalyzeDocumentRequest with base64_source (your working method)
             try:
                 if progress_callback:
                     progress_callback("📝 Processing with AnalyzeDocumentRequest method...")
@@ -55,7 +100,7 @@ class AzureDocumentProcessor:
                 # Create base64 encoded content
                 base64_source = base64.b64encode(file_bytes).decode('utf-8')
                 
-                # Create the request body
+                # Create the request body using the working pattern
                 analyze_request = AnalyzeDocumentRequest(
                     base64_source=base64_source
                 )
@@ -73,19 +118,19 @@ class AzureDocumentProcessor:
                 
                 if extracted_data.get("content") and len(extracted_data["content"].strip()) > 0:
                     logger.info(f"✅ Method 1 SUCCESS: {len(extracted_data['content'])} characters")
-                    return extracted_data
+                    return self._format_success_response(extracted_data)
                 else:
-                    raise Exception("No content extracted")
+                    raise Exception("No content extracted from method 1")
                     
             except Exception as method1_error:
                 logger.warning(f"Method 1 failed: {method1_error}")
                 
-                # METHOD 2: Try with direct bytes parameter
+                # METHOD 2: Try with BytesIO stream (your working fallback)
                 try:
                     if progress_callback:
-                        progress_callback("🔄 Trying alternative method...")
+                        progress_callback("🔄 Trying alternative BytesIO method...")
                     
-                    # Reset for second attempt
+                    # Reset for second attempt using BytesIO
                     document_stream = io.BytesIO(file_bytes)
                     document_stream.seek(0)
                     
@@ -100,19 +145,19 @@ class AzureDocumentProcessor:
                     
                     if extracted_data.get("content") and len(extracted_data["content"].strip()) > 0:
                         logger.info(f"✅ Method 2 SUCCESS: {len(extracted_data['content'])} characters")
-                        return extracted_data
+                        return self._format_success_response(extracted_data)
                     else:
-                        raise Exception("No content extracted")
+                        raise Exception("No content extracted from method 2")
                         
                 except Exception as method2_error:
                     logger.warning(f"Method 2 failed: {method2_error}")
                     
-                    # METHOD 3: Try with older SDK pattern
+                    # METHOD 3: Legacy compatibility pattern (your working final fallback)
                     try:
                         if progress_callback:
                             progress_callback("🔄 Trying legacy compatibility method...")
                         
-                        # Try the older parameter structure
+                        # Try the older parameter structure exactly as in your working code
                         poller = self.client.begin_analyze_document(
                             "prebuilt-read",
                             file_bytes,
@@ -123,19 +168,28 @@ class AzureDocumentProcessor:
                         extracted_data = self._process_analysis_result_optimized(result)
                         
                         logger.info(f"✅ Method 3 SUCCESS: {len(extracted_data['content'])} characters")
-                        return extracted_data
+                        return self._format_success_response(extracted_data)
                         
                     except Exception as method3_error:
                         logger.error(f"All methods failed. Last error: {method3_error}")
-                        raise Exception(f"Document analysis failed: {str(method3_error)}")
+                        error_msg = f"Document analysis failed after trying all methods: {str(method3_error)}"
+                        return self._create_error_response(error_msg)
             
         except Exception as e:
-            logger.error(f"❌ Document analysis failed: {e}")
-            raise Exception(f"Document analysis failed: {str(e)}")
+            error_msg = f"Azure OCR failed: {str(e)}"
+            logger.error(error_msg)
+            return self._create_error_response(error_msg)
     
-    def comprehensive_document_analysis(self, file_bytes, content_type, file_info: dict, progress_callback=None) -> Dict:
+    def comprehensive_document_analysis(self, 
+                                      file_bytes: bytes, 
+                                      content_type: str, 
+                                      file_info: Dict,
+                                      progress_callback: Optional[Callable[[str], None]] = None) -> Dict:
+        """
+        Perform comprehensive document analysis including layout, tables, and text
+        """
         if not self.is_available:
-            raise Exception("Azure Document Intelligence service not available")
+            return self._create_fallback_response("Azure Document Intelligence not available")
         
         results = {
             "text_extraction": {},
@@ -151,58 +205,73 @@ class AzureDocumentProcessor:
             if progress_callback:
                 progress_callback("🧠 Running comprehensive analysis...")
             
-            # 1. Text Extraction
-            results["text_extraction"] = self.extract_text_with_handwriting(
+            # 1. Text Extraction using the working method
+            text_result = self.extract_text_with_handwriting(
                 file_bytes, content_type, progress_callback
             )
             
-            # 2. Layout Analysis (if text extraction succeeded)
-            extracted_content = results["text_extraction"].get("content", "")
-            
-            if extracted_content and len(extracted_content.strip()) > 10:
-                if progress_callback:
-                    progress_callback("📋 Analyzing document structure...")
+            if text_result.get("status") == "success":
+                results["text_extraction"] = text_result.get("text_extraction", {})
                 
-                try:
-                    # Try layout analysis with East US compatible method
-                    base64_source = base64.b64encode(file_bytes).decode('utf-8')
-                    layout_request = AnalyzeDocumentRequest(base64_source=base64_source)
+                # 2. Layout Analysis (if text extraction succeeded)
+                extracted_content = results["text_extraction"].get("extracted_text", "")
+                
+                if extracted_content and len(extracted_content.strip()) > 10:
+                    if progress_callback:
+                        progress_callback("📋 Analyzing document structure...")
                     
-                    layout_poller = self.client.begin_analyze_document(
-                        model_id="prebuilt-layout",
-                        analyze_request=layout_request
-                    )
-                    
-                    layout_result = layout_poller.result()
-                    results["layout_analysis"] = self._process_layout_result_optimized(layout_result)
-                    results["table_extraction"] = self._extract_tables_optimized(layout_result)
-                    
-                    results["summary_optimization"] = self._optimize_for_summary(
-                        results["text_extraction"], 
-                        results["layout_analysis"]
-                    )
-                    
-                except Exception as layout_error:
-                    logger.warning(f"Layout analysis failed: {layout_error}")
-                    results["layout_analysis"] = {"status": "failed", "error": str(layout_error)}
-                    results["table_extraction"] = {"tables": [], "status": "failed"}
-                    results["summary_optimization"] = {"status": "basic", "note": "Using text-only optimization"}
+                    try:
+                        # Try layout analysis with the same working pattern
+                        base64_source = base64.b64encode(file_bytes).decode('utf-8')
+                        layout_request = AnalyzeDocumentRequest(base64_source=base64_source)
+                        
+                        layout_poller = self.client.begin_analyze_document(
+                            model_id="prebuilt-layout",
+                            analyze_request=layout_request
+                        )
+                        
+                        layout_result = layout_poller.result()
+                        results["layout_analysis"] = self._process_layout_result_optimized(layout_result)
+                        results["table_extraction"] = self._extract_tables_optimized(layout_result)
+                        
+                        results["summary_optimization"] = self._optimize_for_summary(
+                            results["text_extraction"], 
+                            results["layout_analysis"]
+                        )
+                        
+                    except Exception as layout_error:
+                        logger.warning(f"Layout analysis failed: {layout_error}")
+                        results["layout_analysis"] = {"status": "failed", "error": str(layout_error)}
+                        results["table_extraction"] = {"tables": [], "status": "failed"}
+                        results["summary_optimization"] = {"status": "basic", "note": "Using text-only optimization"}
+                
+                # 3. Generate quality metrics
+                results["handwriting_analysis"] = self._analyze_handwriting_quality_enhanced(results["text_extraction"])
+                results["quality_metrics"] = self._generate_quality_metrics_enhanced(results)
+                results["metadata"] = self._compile_metadata_enhanced(results, file_info)
             
-            # 3. Generate quality metrics
-            results["handwriting_analysis"] = self._analyze_handwriting_quality_enhanced(results["text_extraction"])
-            results["quality_metrics"] = self._generate_quality_metrics_enhanced(results)
-            results["metadata"] = self._compile_metadata_enhanced(results, file_info)
+            else:
+                # Text extraction failed
+                return text_result
             
             if progress_callback:
-                progress_callback("✅ Analysis complete!")
+                progress_callback("✅ Comprehensive analysis complete!")
             
-            return results
+            return {
+                "status": "success",
+                "comprehensive_analysis": results,
+                "timestamp": datetime.now().isoformat()
+            }
             
         except Exception as e:
-            logger.error(f"❌ Comprehensive analysis failed: {e}")
-            raise Exception(f"Document analysis failed: {str(e)}")
+            error_msg = f"Comprehensive analysis failed: {str(e)}"
+            logger.error(error_msg)
+            return self._create_error_response(error_msg)
     
     def _process_analysis_result_optimized(self, result):
+        """
+        Process analysis result using the same structure as your working code
+        """
         extracted_data = {
             "content": "",
             "structured_content": {},
@@ -216,11 +285,13 @@ class AzureDocumentProcessor:
         }
         
         try:
+            # Extract raw content - this is the main text
             raw_content = getattr(result, 'content', '') or ""
             extracted_data["content"] = raw_content
             
             content_sections = []
             
+            # Process pages if available
             if hasattr(result, 'pages') and result.pages:
                 for page_num, page in enumerate(result.pages, 1):
                     page_data = {
@@ -235,6 +306,7 @@ class AzureDocumentProcessor:
                     
                     page_confidences = []
                     
+                    # Process lines
                     if hasattr(page, 'lines') and page.lines:
                         for line_idx, line in enumerate(page.lines):
                             line_content = getattr(line, 'content', '')
@@ -254,6 +326,7 @@ class AzureDocumentProcessor:
                                 extracted_data["handwriting_confidence"].append(line_confidence)
                                 page_confidences.append(line_confidence)
                             
+                            # Add to content hierarchy if important
                             if line_data["importance_score"] > 0.7:
                                 content_sections.append({
                                     "content": line_content,
@@ -262,9 +335,11 @@ class AzureDocumentProcessor:
                                     "page": page_num
                                 })
                     
+                    # Calculate page quality score
                     if page_confidences:
                         page_data["quality_score"] = sum(page_confidences) / len(page_confidences)
                     
+                    # Process words
                     if hasattr(page, 'words') and page.words:
                         for word in page.words:
                             word_data = {
@@ -277,6 +352,7 @@ class AzureDocumentProcessor:
                     
                     extracted_data["pages"].append(page_data)
             
+            # Process paragraphs if available
             if hasattr(result, 'paragraphs') and result.paragraphs:
                 for para_idx, paragraph in enumerate(result.paragraphs):
                     para_content = getattr(paragraph, 'content', '')
@@ -291,12 +367,14 @@ class AzureDocumentProcessor:
                     }
                     extracted_data["paragraphs"].append(para_data)
             
+            # Create content hierarchy
             extracted_data["content_hierarchy"] = sorted(
                 content_sections, 
                 key=lambda x: (x["importance"], x["confidence"]), 
                 reverse=True
             )
             
+            # Create structured content
             extracted_data["structured_content"] = {
                 "high_priority": [item["content"] for item in extracted_data["content_hierarchy"][:5]],
                 "medium_priority": [item["content"] for item in extracted_data["content_hierarchy"][5:15]],
@@ -304,6 +382,7 @@ class AzureDocumentProcessor:
                 "total_sections": len(content_sections)
             }
             
+            # Calculate metadata
             avg_confidence = (
                 sum(extracted_data["handwriting_confidence"]) / len(extracted_data["handwriting_confidence"]) 
                 if extracted_data["handwriting_confidence"] else 0.0
@@ -321,8 +400,7 @@ class AzureDocumentProcessor:
                 "has_handwriting": len(extracted_data["handwriting_confidence"]) > 0,
                 "summary_readiness": self._assess_summary_readiness(extracted_data),
                 "processing_successful": True,
-                "optimization_level": "enhanced",
-                "region": "East US"
+                "optimization_level": "enhanced"
             }
             
         except Exception as processing_error:
@@ -336,6 +414,7 @@ class AzureDocumentProcessor:
         return extracted_data
     
     def _calculate_line_importance(self, line_content: str) -> float:
+        """Calculate importance score for a line of text"""
         if not line_content or len(line_content.strip()) < 3:
             return 0.0
         
@@ -359,6 +438,7 @@ class AzureDocumentProcessor:
         return max_score
     
     def _determine_hierarchy_level(self, role: str, content: str) -> int:
+        """Determine hierarchy level of content"""
         hierarchy_map = {
             'title': 1, 'sectionHeading': 2, 'heading': 3, 'subheading': 4, 'paragraph': 5
         }
@@ -371,6 +451,7 @@ class AzureDocumentProcessor:
         return level
     
     def _calculate_summary_relevance(self, content: str) -> float:
+        """Calculate how relevant content is for summarization"""
         if not content:
             return 0.0
         
@@ -390,6 +471,7 @@ class AzureDocumentProcessor:
         return min(relevance_score, 1.0)
     
     def _assess_summary_readiness(self, extracted_data: dict) -> str:
+        """Assess how ready the content is for summarization"""
         content_length = len(extracted_data.get("content", ""))
         avg_confidence = extracted_data.get("metadata", {}).get("average_confidence", 0.0)
         hierarchy_items = len(extracted_data.get("content_hierarchy", []))
@@ -404,6 +486,7 @@ class AzureDocumentProcessor:
             return "poor"
     
     def _process_layout_result_optimized(self, result):
+        """Process layout analysis results"""
         layout_data = {
             "sections": [],
             "document_structure": {},
@@ -443,6 +526,7 @@ class AzureDocumentProcessor:
         return layout_data
     
     def _extract_tables_optimized(self, result):
+        """Extract and optimize table data"""
         table_data = {
             "tables": [],
             "summary_relevant_tables": [],
@@ -488,6 +572,7 @@ class AzureDocumentProcessor:
         return table_data
     
     def _optimize_for_summary(self, text_extraction: dict, layout_analysis: dict) -> dict:
+        """Optimize content for summary generation"""
         optimization = {
             "summary_ready_content": [],
             "key_sections": [],
@@ -535,6 +620,7 @@ class AzureDocumentProcessor:
         return optimization
     
     def _analyze_handwriting_quality_enhanced(self, text_extraction_result: dict) -> Dict:
+        """Analyze handwriting recognition quality"""
         analysis = {
             "handwriting_detected": False,
             "confidence_distribution": {},
@@ -579,6 +665,7 @@ class AzureDocumentProcessor:
         return analysis
     
     def _generate_quality_metrics_enhanced(self, results: dict) -> Dict:
+        """Generate comprehensive quality metrics"""
         metrics = {
             "overall_quality": "Unknown",
             "text_extraction_quality": 0.0,
@@ -617,17 +704,15 @@ class AzureDocumentProcessor:
         return metrics
     
     def _compile_metadata_enhanced(self, results: dict, file_info: dict) -> Dict:
+        """Compile comprehensive metadata"""
         try:
-            import datetime
-            
             text_stats = results.get("text_extraction", {}).get("metadata", {})
             summary_opt = results.get("summary_optimization", {})
             
             return {
                 "file_info": file_info,
-                "processing_timestamp": datetime.datetime.now().isoformat(),
+                "processing_timestamp": datetime.now().isoformat(),
                 "api_version": "2024-02-29-preview",
-                "region": "East US",
                 "optimization_level": "enhanced",
                 "models_used": ["prebuilt-read", "prebuilt-layout"],
                 "content_statistics": {
@@ -652,5 +737,53 @@ class AzureDocumentProcessor:
         except Exception as e:
             logger.error(f"Error compiling metadata: {e}")
             return {"error": str(e)}
+    
+    def _format_success_response(self, extracted_data: dict) -> Dict:
+        """Format successful extraction response"""
+        return {
+            "status": "success",
+            "text_extraction": {
+                "extracted_text": extracted_data.get("content", ""),
+                "text_blocks": extracted_data.get("lines", []),
+                "handwriting_detected": len(extracted_data.get("handwriting_confidence", [])) > 0,
+                "confidence_scores": extracted_data.get("handwriting_confidence", []),
+                "total_pages": extracted_data.get("metadata", {}).get("page_count", 0),
+                "processing_metadata": extracted_data.get("metadata", {}),
+                "optimized_text": extracted_data.get("content", "")
+            },
+            "timestamp": datetime.now().isoformat(),
+            "azure_model_used": "prebuilt-read"
+        }
+    
+    def _create_fallback_response(self, message: str) -> Dict:
+        """Create fallback response when Azure is not available"""
+        return {
+            "status": "fallback",
+            "message": message,
+            "text_extraction": {
+                "extracted_text": "",
+                "processing_metadata": {
+                    "azure_available": False,
+                    "fallback_used": True
+                }
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    def _create_error_response(self, error_message: str) -> Dict:
+        """Create standardized error response"""
+        return {
+            "status": "error",
+            "error": error_message,
+            "text_extraction": {
+                "extracted_text": "",
+                "processing_metadata": {
+                    "error_occurred": True,
+                    "azure_available": self.is_available
+                }
+            },
+            "timestamp": datetime.now().isoformat()
+        }
 
+# Create global instance
 azure_document_processor = AzureDocumentProcessor()

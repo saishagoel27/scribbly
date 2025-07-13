@@ -1,927 +1,1125 @@
+import logging
+import re
+import time
+from typing import Dict, List, Optional, Tuple, Callable, Any
+from datetime import datetime
+import json
+
 from azure.ai.textanalytics import TextAnalyticsClient
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import AzureError, HttpResponseError
-import logging
-import json
-import re
-import random
-import datetime
-from typing import Dict, List, Optional
-from config import config
+from azure.core.exceptions import AzureError, HttpResponseError, ServiceRequestError
+from spellchecker import SpellChecker
 
-# Set up logging
+from config import Config
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EnhancedTextProcessor:
-    """Enhanced text processing for better OCR output handling"""
-    
-    @staticmethod
-    def clean_ocr_text(text: str) -> str:
-        """Clean and normalize OCR text output"""
-        if not text:
-            return ""
+    """Enhanced text processing for better OCR output handling and study material optimization"""
+
+    def __init__(self):
+        """Initialize enhanced text processor with spell checker"""
+        try:
+            self.spell_checker = SpellChecker()
+            self.study_keywords = self._load_study_keywords()
+            logger.info("✅ Enhanced text processor initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ Spell checker initialization failed: {e}")
+            self.spell_checker = None
+
+    def _load_study_keywords(self) -> Dict[str, List[str]]:
+        """Load comprehensive study-related keywords for content analysis"""
+        return {
+            "definitions": [
+                "definition", "define", "meaning", "concept", "term", "refers to",
+                "is defined as", "can be described as", "is known as", "is called"
+            ],
+            "explanations": [
+                "because", "since", "due to", "as a result", "therefore", "thus",
+                "consequently", "leads to", "causes", "results in", "explains why"
+            ],
+            "examples": [
+                "for example", "such as", "including", "like", "instance", "case",
+                "illustration", "demonstrates", "shows", "exemplifies"
+            ],
+            "processes": [
+                "process", "procedure", "method", "technique", "approach", "way",
+                "steps", "stages", "phases", "sequence", "algorithm"
+            ],
+            "comparisons": [
+                "compared to", "in contrast", "however", "whereas", "unlike",
+                "similar to", "different from", "distinction", "versus"
+            ],
+            "importance": [
+                "important", "significant", "crucial", "essential", "vital",
+                "key", "primary", "major", "fundamental", "critical"
+            ]
+        }
+
+    def clean_ocr_text(self, text: str) -> str:
+        """
+        Comprehensive OCR text cleaning and optimization
         
-        # Remove excessive whitespace and normalize
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Fix common OCR errors
+        Args:
+            text: Raw OCR text
+            
+        Returns:
+            Cleaned and optimized text
+        """
+        try:
+            if not text or not text.strip():
+                return ""
+
+            # Step 1: Basic normalization
+            cleaned = text.strip()
+            
+            # Step 2: Fix common OCR errors
+            cleaned = self._fix_common_ocr_errors(cleaned)
+            
+            # Step 3: Normalize whitespace and formatting
+            cleaned = self._normalize_formatting(cleaned)
+            
+            # Step 4: Fix sentence boundaries
+            cleaned = self._fix_sentence_boundaries(cleaned)
+            
+            # Step 5: Spell check and correct (if available)
+            if self.spell_checker:
+                cleaned = self._spell_check_text(cleaned)
+            
+            # Step 6: Optimize for study content
+            cleaned = self._optimize_for_study_content(cleaned)
+            
+            logger.info(f"📝 Text cleaned: {len(text)} → {len(cleaned)} characters")
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Text cleaning error: {e}")
+            return text  # Return original if cleaning fails
+
+    def _fix_common_ocr_errors(self, text: str) -> str:
+        """Fix common OCR recognition errors"""
+        # Common character substitutions
         ocr_fixes = {
-            r'\b0\b': 'o',  # Zero to letter O
-            r'\b1\b(?=[a-zA-Z])': 'l',  # Number 1 to letter l
-            r'\b5\b(?=[a-zA-Z])': 'S',  # Number 5 to letter S
-            r'rn\b': 'm',  # rn to m
-            r'\bvv\b': 'w',  # vv to w
-            r'([.!?])\s*([a-z])': r'\1 \2',  # Fix sentence spacing
+            # Number/letter confusion
+            '0': 'O', '1': 'I', '5': 'S', '8': 'B',
+            # Special characters
+            '|': 'l', '¡': 'i', '©': 'c', '®': 'r',
+            # Punctuation
+            '.,': '.', '..': '.', ';;': ';', '::': ':',
+            # Spacing issues
+            ' ,': ',', ' .': '.', ' ;': ';', ' :': ':',
+            # Line breaks
+            '\r\n': '\n', '\r': '\n'
         }
         
-        for pattern, replacement in ocr_fixes.items():
+        # Apply context-aware fixes
+        for wrong, right in ocr_fixes.items():
+            # Only fix in appropriate contexts
+            if wrong in ['0', '1', '5', '8'] and text.count(wrong) > text.count(right) * 2:
+                # Likely actual numbers, don't fix
+                continue
+            text = text.replace(wrong, right)
+        
+        return text
+
+    def _normalize_formatting(self, text: str) -> str:
+        """Normalize text formatting and spacing"""
+        # Remove excessive whitespace
+        text = re.sub(r' +', ' ', text)
+        
+        # Normalize line breaks
+        text = re.sub(r'\n+', '\n', text)
+        
+        # Remove trailing/leading spaces on lines
+        lines = [line.strip() for line in text.split('\n')]
+        text = '\n'.join(line for line in lines if line)
+        
+        # Fix spacing around punctuation
+        text = re.sub(r' +([,.;:!?])', r'\1', text)
+        text = re.sub(r'([,.;:!?])([A-Za-z])', r'\1 \2', text)
+        
+        return text
+
+    def _fix_sentence_boundaries(self, text: str) -> str:
+        """Fix sentence boundary detection issues"""
+        # Add missing spaces after periods
+        text = re.sub(r'\.([A-Z])', r'. \1', text)
+        
+        # Fix missing periods at line ends
+        lines = text.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if line and not line.endswith(('.', '!', '?', ':', ';')):
+                # Check if next line starts with capital (new sentence)
+                if i + 1 < len(lines) and lines[i + 1].strip():
+                    next_line = lines[i + 1].strip()
+                    if next_line[0].isupper():
+                        line += '.'
+            fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+
+    def _spell_check_text(self, text: str) -> str:
+        """Apply spell checking with academic context awareness"""
+        if not self.spell_checker:
+            return text
+        
+        try:
+            words = text.split()
+            corrected_words = []
+            
+            for word in words:
+                # Extract actual word (remove punctuation for checking)
+                clean_word = re.sub(r'[^\w]', '', word.lower())
+                
+                if len(clean_word) > 2 and clean_word not in self.spell_checker:
+                    # Get correction candidates
+                    candidates = self.spell_checker.candidates(clean_word)
+                    if candidates:
+                        # Use the most likely candidate
+                        correction = min(candidates, key=lambda x: self.spell_checker.word_frequency.get(x, 0))
+                        if correction != clean_word:
+                            # Apply correction while preserving case and punctuation
+                            word = self._apply_correction(word, clean_word, correction)
+                
+                corrected_words.append(word)
+            
+            return ' '.join(corrected_words)
+            
+        except Exception as e:
+            logger.warning(f"Spell check error: {e}")
+            return text
+
+    def _apply_correction(self, original_word: str, wrong: str, correction: str) -> str:
+        """Apply spell correction while preserving formatting"""
+        # Simple case preservation
+        if wrong.isupper():
+            correction = correction.upper()
+        elif wrong.istitle():
+            correction = correction.capitalize()
+        
+        return original_word.replace(wrong, correction)
+
+    def _optimize_for_study_content(self, text: str) -> str:
+        """Optimize text specifically for study material and flashcard generation"""
+        # Enhance definition patterns
+        text = re.sub(r'(\w+)\s*:\s*([A-Z])', r'\1: \2', text)
+        
+        # Improve list formatting
+        text = re.sub(r'([0-9]+)\.\s*', r'\n\1. ', text)
+        text = re.sub(r'([•-])\s*', r'\n\1 ', text)
+        
+        # Enhance emphasis indicators
+        emphasis_patterns = [
+            (r'\*\*([^*]+)\*\*', r'**\1**'),  # Bold
+            (r'\*([^*]+)\*', r'*\1*'),        # Italic
+            (r'_([^_]+)_', r'_\1_')           # Underline
+        ]
+        
+        for pattern, replacement in emphasis_patterns:
             text = re.sub(pattern, replacement, text)
         
-        # Remove standalone punctuation and artifacts
-        text = re.sub(r'\b[^\w\s]{1,3}\b', ' ', text)
-        
-        # Fix sentence boundaries
-        text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
-        
-        # Remove very short "words" that are likely artifacts
-        words = text.split()
-        cleaned_words = []
-        for word in words:
-            # Keep words that are longer than 1 char or are meaningful single chars
-            if len(word) > 1 or word.lower() in ['a', 'i', 'o']:
-                cleaned_words.append(word)
-        
-        return ' '.join(cleaned_words).strip()
-    
+        return text
+
     @staticmethod
-    def extract_sentences(text: str, min_length: int = 15) -> List[str]:
-        """Extract meaningful sentences from text"""
-        # Split by sentence endings
-        sentences = re.split(r'[.!?]+', text)
-        
-        meaningful_sentences = []
-        for sentence in sentences:
-            sentence = sentence.strip()
-            
-            # Filter out short fragments and artifacts
-            if len(sentence) >= min_length:
-                # Check if it has proper word structure
-                words = sentence.split()
-                if len(words) >= 3:  # At least 3 words
-                    # Check if it's not just numbers or single chars
-                    word_lengths = [len(w) for w in words if w.isalpha()]
-                    if word_lengths and sum(word_lengths) / len(word_lengths) > 2:
-                        meaningful_sentences.append(sentence)
-        
-        return meaningful_sentences
-    
-    @staticmethod
-    def identify_key_concepts(text: str) -> List[Dict]:
-        """Identify key concepts using NLP techniques"""
-        sentences = EnhancedTextProcessor.extract_sentences(text)
-        concepts = []
-        
-        # Look for definition patterns
-        definition_patterns = [
-            r'(.+?)\s+(?:is|are|means?|refers? to|defined as)\s+(.+)',
-            r'(.+?):\s*(.+)',  # Colon definitions
-            r'(.+?)\s*-\s*(.+)',  # Dash definitions
-        ]
-        
-        for sentence in sentences:
-            for pattern in definition_patterns:
-                matches = re.findall(pattern, sentence, re.IGNORECASE)
-                for match in matches:
-                    term = match[0].strip()
-                    definition = match[1].strip()
-                    
-                    # Validate the concept
-                    if (3 <= len(term) <= 50 and 
-                        10 <= len(definition) <= 200 and
-                        len(term.split()) <= 5):
-                        
-                        concepts.append({
-                            "term": term,
-                            "definition": definition,
-                            "sentence": sentence,
-                            "type": "definition",
-                            "confidence": 0.8
-                        })
-        
-        return concepts
-    
-    @staticmethod
-    def score_sentence_importance(sentence: str, all_sentences: List[str]) -> float:
-        """Score sentence importance using multiple factors"""
-        score = 0.0
-        
-        # Length scoring (prefer medium-length sentences)
-        word_count = len(sentence.split())
-        if 10 <= word_count <= 25:
-            score += 0.3
-        elif 6 <= word_count <= 35:
-            score += 0.2
-        
-        # Keyword importance
-        important_keywords = [
-            'important', 'key', 'main', 'primary', 'essential', 'critical',
-            'summary', 'conclusion', 'result', 'finding', 'therefore',
-            'however', 'moreover', 'furthermore', 'in addition'
-        ]
-        
-        sentence_lower = sentence.lower()
-        for keyword in important_keywords:
-            if keyword in sentence_lower:
-                score += 0.2
-                break
-        
-        # Position scoring (first and last sentences often important)
+    def extract_key_concepts(text: str) -> List[str]:
+        """Extract key concepts and terms from text"""
         try:
-            position = all_sentences.index(sentence)
-            total_sentences = len(all_sentences)
+            # Find capitalized terms (likely proper nouns/concepts)
+            concepts = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
             
-            if position == 0:  # First sentence
-                score += 0.2
-            elif position == total_sentences - 1:  # Last sentence
-                score += 0.15
-            elif position < total_sentences * 0.3:  # Early sentences
-                score += 0.1
-        except ValueError:
-            pass
-        
-        # Capitalization (proper nouns indicate importance)
-        capitalized_words = re.findall(r'\b[A-Z][a-z]+', sentence)
-        score += min(len(capitalized_words) * 0.05, 0.2)
-        
-        # Numbers and data
-        if re.search(r'\d+', sentence):
-            score += 0.1
-        
-        # Question or exclamation
-        if sentence.endswith('?') or sentence.endswith('!'):
-            score += 0.1
-        
-        return min(score, 1.0)
+            # Find definition patterns
+            definition_patterns = [
+                r'(\w+)\s+is\s+(?:a|an|the)?\s*([^.]+)',
+                r'(\w+)\s*:\s*([^.]+)',
+                r'(?:define|definition of)\s+(\w+)',
+            ]
+            
+            for pattern in definition_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                concepts.extend([match[0] if isinstance(match, tuple) else match for match in matches])
+            
+            # Remove duplicates and filter
+            unique_concepts = list(set(concepts))
+            return [concept for concept in unique_concepts if len(concept) > 2]
+            
+        except Exception as e:
+            logger.warning(f"Concept extraction error: {e}")
+            return []
+
+    @staticmethod
+    def assess_text_complexity(text: str) -> Dict[str, Any]:
+        """Assess text complexity for flashcard generation optimization"""
+        try:
+            words = text.split()
+            sentences = re.split(r'[.!?]+', text)
+            
+            # Basic metrics
+            word_count = len(words)
+            sentence_count = len([s for s in sentences if s.strip()])
+            avg_word_length = sum(len(word) for word in words) / word_count if word_count > 0 else 0
+            avg_sentence_length = word_count / sentence_count if sentence_count > 0 else 0
+            
+            # Complexity indicators
+            complex_words = [word for word in words if len(word) > 6]
+            complex_word_ratio = len(complex_words) / word_count if word_count > 0 else 0
+            
+            # Reading level estimation
+            if avg_sentence_length <= 15 and complex_word_ratio <= 0.15:
+                reading_level = "easy"
+            elif avg_sentence_length <= 20 and complex_word_ratio <= 0.25:
+                reading_level = "medium"
+            else:
+                reading_level = "hard"
+            
+            return {
+                "word_count": word_count,
+                "sentence_count": sentence_count,
+                "avg_word_length": round(avg_word_length, 2),
+                "avg_sentence_length": round(avg_sentence_length, 2),
+                "complex_word_ratio": round(complex_word_ratio, 2),
+                "reading_level": reading_level,
+                "flashcard_suitability": "good" if reading_level in ["easy", "medium"] else "challenging"
+            }
+            
+        except Exception as e:
+            logger.warning(f"Complexity assessment error: {e}")
+            return {"error": str(e)}
 
 class AzureLanguageProcessor:
-    """Streamlined Azure Text Analytics processor focused on summary and flashcards"""
-    
+    """Enhanced Azure Text Analytics processor focused on study materials and flashcard generation"""
+
     def __init__(self):
+        """Initialize Azure Language client and enhanced text processor"""
         self.client = None
         self.is_available = False
+        self.endpoint = Config.AZURE_LANGUAGE_ENDPOINT
+        self.key = Config.AZURE_LANGUAGE_KEY
+        self.timeout = Config.AZURE_TIMEOUT
+        
+        # Initialize enhanced text processor
         self.text_processor = EnhancedTextProcessor()
+        
         self._initialize_client()
-    
+
     def _initialize_client(self):
-        """Initialize Azure Text Analytics client"""
+        """Initialize Azure Text Analytics client with proper error handling"""
         try:
-            if config.has_language_service():
-                self.client = TextAnalyticsClient(
-                    endpoint=config.language_endpoint,
-                    credential=AzureKeyCredential(config.language_key)
-                )
-                self.is_available = True
-                logger.info("✅ Azure Text Analytics initialized successfully")
-            else:
+            if not self.endpoint or not self.key:
                 logger.warning("❌ Azure Language Service credentials not configured")
                 self.is_available = False
+                return
+
+            # Create client with proper credentials
+            credential = AzureKeyCredential(self.key)
+            self.client = TextAnalyticsClient(
+                endpoint=self.endpoint,
+                credential=credential
+            )
+            
+            # Test connection
+            self._test_connection()
+            self.is_available = True
+            logger.info("✅ Azure Language Service client initialized successfully")
+            
         except Exception as e:
             logger.error(f"❌ Failed to initialize Azure Language Service: {e}")
             self.is_available = False
-    
+
+    def _test_connection(self):
+        """Test Azure Language Service connection"""
+        try:
+            # Simple test with minimal text
+            test_docs = ["Test connection"]
+            self.client.detect_language(documents=test_docs)
+            logger.info("🔗 Azure Language Service connection verified")
+        except Exception as e:
+            logger.warning(f"⚠️ Azure Language Service connection test failed: {e}")
+            raise
+
     def analyze_for_study_materials(self, text: str, progress_callback=None) -> Dict:
         """
-        Focused analysis for generating study materials (summary + flashcards)
+        Comprehensive analysis optimized for study material and flashcard generation
+        
+        Args:
+            text: Input text to analyze
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Dict containing comprehensive analysis results
         """
         if not self.is_available:
-            return self._create_fallback_result("Azure Language Service not available")
-        
-        if not text or len(text.strip()) < 10:
-            return self._create_fallback_result("Insufficient text for analysis")
-        
-        # Step 1: Clean and process the OCR text
-        if progress_callback:
-            progress_callback("🧹 Cleaning extracted text...")
-        
-        cleaned_text = self.text_processor.clean_ocr_text(text)
-        
-        if len(cleaned_text.strip()) < 20:
-            return self._create_fallback_result("Text too short after cleaning")
-        
-        results = {
-            "summary": {},
-            "key_phrases": {},
-            "flashcards": [],
-            "processed_text": cleaned_text,
-            "metadata": {}
-        }
-        
+            return self._create_fallback_analysis(text)
+
         try:
             if progress_callback:
-                progress_callback("🔑 Extracting key concepts...")
-            
-            # Split text for Azure API limits
-            text_chunks = self._split_text_for_processing(cleaned_text)
-            
-            # 1. Key Phrase Extraction (focused)
-            results["key_phrases"] = self._extract_key_phrases_focused(text_chunks, cleaned_text)
-            
-            # 2. Enhanced Summary Generation (primary focus)
+                progress_callback("🧠 Starting Azure Language analysis...")
+
+            # Step 1: Clean and preprocess text
             if progress_callback:
-                progress_callback("📝 Generating intelligent summary...")
-            results["summary"] = self._generate_enhanced_summary(cleaned_text, text_chunks)
+                progress_callback("🧹 Cleaning and preprocessing text...")
             
-            # 3. Generate Study Flashcards (secondary focus)
+            cleaned_text = self.text_processor.clean_ocr_text(text)
+            if len(cleaned_text.strip()) < 10:
+                return {"error": "Insufficient text for analysis after cleaning"}
+
+            # Step 2: Split text into manageable chunks
+            text_chunks = self._split_text_for_analysis(cleaned_text)
+            
+            # Step 3: Extract key phrases with study focus
             if progress_callback:
-                progress_callback("🎴 Creating study flashcards...")
+                progress_callback("🔍 Extracting key phrases and concepts...")
             
-            key_concepts = self.text_processor.identify_key_concepts(cleaned_text)
-            results["flashcards"] = self._generate_study_flashcards(
-                cleaned_text, results["key_phrases"], key_concepts
+            key_phrases_result = self._extract_key_phrases_focused(text_chunks, cleaned_text)
+
+            # Step 4: Generate enhanced summary
+            if progress_callback:
+                progress_callback("📝 Generating study-focused summary...")
+            
+            summary_result = self._generate_enhanced_summary(cleaned_text, text_chunks)
+
+            # Step 5: Analyze sentiment and tone
+            if progress_callback:
+                progress_callback("😊 Analyzing content sentiment...")
+            
+            sentiment_result = self._analyze_sentiment(text_chunks)
+
+            # Step 6: Extract entities (people, places, concepts)
+            if progress_callback:
+                progress_callback("🏷️ Identifying key entities...")
+            
+            entities_result = self._extract_entities(text_chunks)
+
+            # Step 7: Assess study material quality
+            if progress_callback:
+                progress_callback("📊 Assessing study material quality...")
+            
+            study_assessment = self._assess_study_quality(cleaned_text, key_phrases_result, entities_result)
+
+            # Step 8: Generate flashcard recommendations
+            if progress_callback:
+                progress_callback("🎴 Generating flashcard recommendations...")
+            
+            flashcard_recommendations = self._generate_flashcard_recommendations(
+                cleaned_text, key_phrases_result, entities_result, study_assessment
             )
-            
-            # 4. Compile metadata
-            results["metadata"] = self._compile_metadata(results, cleaned_text, text)
-            
+
             if progress_callback:
-                progress_callback("✅ Study materials ready!")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"❌ Study materials generation failed: {e}")
-            return self._create_fallback_result(f"Analysis failed: {str(e)}")
-    
-    def _extract_key_phrases_focused(self, text_chunks: List[str], full_text: str) -> Dict:
-        """Focused key phrase extraction for study materials"""
-        try:
-            phrase_frequencies = {}
-            
-            # Get Azure key phrases
-            for chunk in text_chunks:
-                response = self.client.extract_key_phrases(documents=[chunk])
-                
-                for doc in response:
-                    if not doc.is_error:
-                        for phrase in doc.key_phrases:
-                            if self._is_study_relevant_phrase(phrase):
-                                phrase_lower = phrase.lower()
-                                if phrase_lower not in phrase_frequencies:
-                                    phrase_frequencies[phrase_lower] = {
-                                        "phrase": phrase,
-                                        "count": 1,
-                                        "importance": self._calculate_study_importance(phrase, full_text)
-                                    }
-                                else:
-                                    phrase_frequencies[phrase_lower]["count"] += 1
-                    else:
-                        logger.error(f"Key phrase extraction error: {doc.error}")
-            
-            # Add manually detected concepts (high priority for studies)
-            key_concepts = self.text_processor.identify_key_concepts(full_text)
-            for concept in key_concepts:
-                term = concept["term"]
-                if self._is_study_relevant_phrase(term):
-                    term_lower = term.lower()
-                    if term_lower not in phrase_frequencies:
-                        phrase_frequencies[term_lower] = {
-                            "phrase": term,
-                            "count": 1,
-                            "importance": 0.9  # High importance for study concepts
-                        }
-            
-            # Sort by study relevance
-            sorted_phrases = sorted(
-                phrase_frequencies.values(),
-                key=lambda x: (x["importance"], x["count"]),
-                reverse=True
-            )
-            
-            # Filter for study materials (top 15 most relevant)
-            study_phrases = [p for p in sorted_phrases if p["importance"] > 0.4][:15]
-            
-            return {
-                "phrases": [p["phrase"] for p in study_phrases],
-                "phrase_data": study_phrases,
-                "total_phrases": len(study_phrases),
-                "status": "success"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in key phrase extraction: {e}")
-            return {"status": "failed", "error": str(e), "phrases": []}
-    
-    def _is_study_relevant_phrase(self, phrase: str) -> bool:
-        """Check if phrase is relevant for study materials"""
-        if not phrase or len(phrase.strip()) < 3:
-            return False
-        
-        # Remove phrases that are just numbers or punctuation
-        if re.match(r'^[0-9\s\-_.,;:!?]+$', phrase):
-            return False
-        
-        # Remove single character "words" and artifacts
-        words = phrase.split()
-        meaningful_words = [w for w in words if len(w) > 1 or w.lower() in ['a', 'i', 'o']]
-        
-        if len(meaningful_words) < len(words) * 0.7:
-            return False
-        
-        # Prefer academic/study-relevant terms
-        study_indicators = ['concept', 'theory', 'principle', 'method', 'process', 'definition']
-        if any(indicator in phrase.lower() for indicator in study_indicators):
-            return True
-        
-        # Check for reasonable length for study materials
-        if 3 <= len(phrase) <= 40 and 1 <= len(words) <= 4:
-            return True
-        
-        return False
-    
-    def _calculate_study_importance(self, phrase: str, full_text: str) -> float:
-        """Calculate importance specifically for study materials"""
-        base_score = 0.5
-        
-        # Length-based scoring for study materials
-        if 5 <= len(phrase) <= 25:
-            base_score += 0.3
-        elif 3 <= len(phrase) <= 35:
-            base_score += 0.2
-        
-        # Word count scoring
-        word_count = len(phrase.split())
-        if 2 <= word_count <= 3:  # Optimal for study terms
-            base_score += 0.3
-        elif word_count == 1:
-            base_score += 0.2
-        
-        # Study-relevant keywords
-        study_keywords = ['important', 'key', 'main', 'definition', 'concept', 'theory', 'principle']
-        if any(word in phrase.lower() for word in study_keywords):
-            base_score += 0.4
-        
-        # Capitalization (proper nouns/important terms)
-        if phrase[0].isupper() and not phrase.isupper():
-            base_score += 0.2
-        
-        # Frequency in text (important for study materials)
-        frequency = full_text.lower().count(phrase.lower())
-        if frequency > 1:
-            base_score += min(frequency * 0.1, 0.3)
-        
-        return min(base_score, 1.0)
-    
-    def _generate_enhanced_summary(self, cleaned_text: str, text_chunks: List[str]) -> Dict:
-        """Generate focused summary for study purposes"""
-        try:
-            # Try multiple summarization methods and pick the best
-            summaries = []
-            
-            # Method 1: Concept-based summary (best for study materials)
-            concept_summary = self._concept_based_summarization(cleaned_text)
-            if concept_summary.get("status") == "success":
-                summaries.append(concept_summary)
-            
-            # Method 2: Enhanced rule-based summary
-            rule_summary = self._enhanced_rule_based_summarization(cleaned_text, max_sentences=3)
-            if rule_summary.get("status") == "success":
-                summaries.append(rule_summary)
-            
-            # Method 3: Key sentences extraction
-            key_summary = self._extract_key_sentences_enhanced(cleaned_text, max_sentences=3)
-            if key_summary.get("status") == "success":
-                summaries.append(key_summary)
-            
-            # Select the best summary for study purposes
-            if summaries:
-                best_summary = self._select_best_study_summary(summaries)
-                return best_summary
-            else:
-                return {"status": "failed", "error": "All summarization methods failed"}
-                
-        except Exception as e:
-            logger.error(f"Error in summary generation: {e}")
-            return {"status": "failed", "error": str(e)}
-    
-    def _concept_based_summarization(self, text: str) -> Dict:
-        """Create summary based on identified concepts (best for study materials)"""
-        try:
-            key_concepts = self.text_processor.identify_key_concepts(text)
-            
-            if not key_concepts:
-                return {"status": "failed", "method": "concept_based", "error": "No concepts found"}
-            
-            # Create summary from top concepts
-            concept_sentences = []
-            for concept in key_concepts[:3]:  # Top 3 concepts
-                sentence = concept["sentence"]
-                if sentence not in concept_sentences:
-                    concept_sentences.append(sentence)
-            
-            if concept_sentences:
-                summary_text = ". ".join(concept_sentences)
-                return {
-                    "text": summary_text,
-                    "method": "concept_based",
-                    "confidence": 0.95,  # High confidence for concept-based
-                    "status": "success",
-                    "concepts_used": len(concept_sentences)
-                }
-            else:
-                return {"status": "failed", "method": "concept_based", "error": "No suitable concept sentences"}
-                
-        except Exception as e:
-            logger.error(f"Error in concept-based summarization: {e}")
-            return {"status": "failed", "method": "concept_based"}
-    
-    def _enhanced_rule_based_summarization(self, text: str, max_sentences: int = 3) -> Dict:
-        """Enhanced rule-based summarization optimized for study materials"""
-        try:
-            sentences = self.text_processor.extract_sentences(text, min_length=20)
-            
-            if len(sentences) <= max_sentences:
-                summary_text = ". ".join(sentences)
-                return {
-                    "text": summary_text,
-                    "method": "enhanced_rule_based",
-                    "confidence": 0.8,
-                    "status": "success"
-                }
-            
-            # Score sentences with study-focused criteria
-            scored_sentences = []
-            for sentence in sentences:
-                score = self._calculate_study_sentence_score(sentence, sentences)
-                scored_sentences.append((sentence, score))
-            
-            # Select top sentences
-            scored_sentences.sort(key=lambda x: x[1], reverse=True)
-            top_sentences = [s[0] for s in scored_sentences[:max_sentences]]
-            
-            # Maintain logical order
-            ordered_sentences = []
-            for sentence in sentences:
-                if sentence in top_sentences:
-                    ordered_sentences.append(sentence)
-            
-            summary_text = ". ".join(ordered_sentences)
-            
-            return {
-                "text": summary_text,
-                "method": "enhanced_rule_based",
-                "confidence": 0.85,
+                progress_callback("✅ Language analysis completed!")
+
+            # Combine all results
+            comprehensive_result = {
                 "status": "success",
-                "selected_sentences": len(top_sentences),
-                "total_sentences": len(sentences)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in enhanced rule-based summarization: {e}")
-            return {"status": "failed", "method": "enhanced_rule_based"}
-    
-    def _calculate_study_sentence_score(self, sentence: str, all_sentences: List[str]) -> float:
-        """Calculate sentence score optimized for study materials"""
-        score = self.text_processor.score_sentence_importance(sentence, all_sentences)
-        
-        # Boost for study-relevant content
-        study_keywords = [
-            'definition', 'define', 'concept', 'theory', 'principle', 'method',
-            'process', 'formula', 'equation', 'rule', 'law', 'property'
-        ]
-        
-        sentence_lower = sentence.lower()
-        for keyword in study_keywords:
-            if keyword in sentence_lower:
-                score += 0.3
-                break
-        
-        # Boost for explanatory sentences
-        if any(word in sentence_lower for word in ['because', 'since', 'therefore', 'thus', 'hence']):
-            score += 0.2
-        
-        # Boost for sentences with examples
-        if any(word in sentence_lower for word in ['example', 'instance', 'such as', 'like']):
-            score += 0.15
-        
-        return min(score, 1.0)
-    
-    def _extract_key_sentences_enhanced(self, text: str, max_sentences: int = 3) -> Dict:
-        """Extract key sentences optimized for study materials"""
-        try:
-            sentences = self.text_processor.extract_sentences(text, min_length=15)
-            
-            if len(sentences) <= max_sentences:
-                summary_text = ". ".join(sentences)
-                return {
-                    "text": summary_text,
-                    "method": "enhanced_key_sentences",
-                    "confidence": 0.7,
-                    "status": "success"
+                "cleaned_text": cleaned_text,
+                "key_phrases": key_phrases_result,
+                "summary": summary_result,
+                "sentiment": sentiment_result,
+                "entities": entities_result,
+                "study_assessment": study_assessment,
+                "flashcard_recommendations": flashcard_recommendations,
+                "text_complexity": self.text_processor.assess_text_complexity(cleaned_text),
+                "processing_metadata": {
+                    "original_length": len(text),
+                    "cleaned_length": len(cleaned_text),
+                    "chunks_processed": len(text_chunks),
+                    "azure_services_used": ["key_phrases", "entities", "sentiment"],
+                    "processing_time": datetime.now().isoformat()
                 }
-            
-            # Calculate word frequencies for study-relevant terms
-            word_freq = self._calculate_study_word_frequencies(text)
-            
-            # Score sentences
-            sentence_scores = []
-            for sentence in sentences:
-                freq_score = self._calculate_sentence_frequency_score(sentence, word_freq)
-                study_score = self._calculate_study_sentence_score(sentence, sentences)
-                
-                # Weighted combination (favor study relevance)
-                combined_score = (freq_score * 0.4) + (study_score * 0.6)
-                sentence_scores.append((sentence, combined_score))
-            
-            # Select top sentences
-            sentence_scores.sort(key=lambda x: x[1], reverse=True)
-            top_sentences = [s[0] for s in sentence_scores[:max_sentences]]
-            
-            # Maintain original order
-            ordered_sentences = []
-            for sentence in sentences:
-                if sentence in top_sentences:
-                    ordered_sentences.append(sentence)
-            
-            summary_text = ". ".join(ordered_sentences)
-            
-            return {
-                "text": summary_text,
-                "method": "enhanced_key_sentences",
-                "confidence": 0.75,
-                "status": "success"
             }
-            
+
+            return comprehensive_result
+
         except Exception as e:
-            logger.error(f"Error in enhanced key sentence extraction: {e}")
-            return {"status": "failed", "method": "enhanced_key_sentences"}
-    
-    def _calculate_study_word_frequencies(self, text: str) -> Dict[str, int]:
-        """Calculate word frequencies focused on study-relevant terms"""
-        # Study-focused stop words (remove common but non-study words)
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-            'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did',
-            'will', 'would', 'could', 'should', 'this', 'that', 'these', 'those', 'there', 'here',
-            'then', 'than', 'when', 'where', 'why', 'how', 'what', 'which', 'who', 'whom', 'whose',
-            'if', 'unless', 'until', 'while', 'during', 'before', 'after', 'above', 'below',
-            'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'once'
-        }
-        
-        # Extract and filter words
-        words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
-        word_freq = {}
-        
-        for word in words:
-            if (word not in stop_words and 
-                len(word) > 2 and 
-                not word.isdigit() and
-                len(word) <= 20):
-                word_freq[word] = word_freq.get(word, 0) + 1
-        
-        # Boost study-relevant terms
-        study_terms = [
-            'concept', 'theory', 'principle', 'method', 'process', 'definition', 
-            'formula', 'equation', 'rule', 'law', 'property', 'function'
-        ]
-        
-        for term in study_terms:
-            if term in word_freq:
-                word_freq[term] *= 2  # Double the weight
-        
-        # Filter out single occurrences (likely OCR errors)
-        filtered_freq = {k: v for k, v in word_freq.items() if v > 1 or len(k) > 4}
-        
-        return filtered_freq
-    
-    def _select_best_study_summary(self, summaries: List[Dict]) -> Dict:
-        """Select the best summary optimized for study purposes"""
-        best_summary = None
-        best_score = 0
-        
-        for summary in summaries:
-            score = summary.get("confidence", 0)
-            
-            # Strong preference for concept-based summaries
-            if summary.get("method") == "concept_based":
-                score += 0.2
-            
-            # Bonus for enhanced methods
-            if "enhanced" in summary.get("method", ""):
-                score += 0.1
-            
-            # Check text quality for study purposes
-            text = summary.get("text", "")
-            
-            # Penalty for very short summaries (not useful for study)
-            if len(text) < 30:
-                score -= 0.3
-            elif len(text) < 60:
-                score -= 0.1
-            
-            # Bonus for study-relevant keywords in summary
-            study_keywords = ['definition', 'concept', 'theory', 'principle', 'method', 'process']
-            if any(keyword in text.lower() for keyword in study_keywords):
-                score += 0.15
-            
-            if score > best_score:
-                best_score = score
-                best_summary = summary
-        
-        return best_summary or summaries[0]
-    
-    def _generate_study_flashcards(self, text: str, key_phrases_data: Dict, 
-                                 key_concepts: List[Dict], max_cards: int = 8) -> List[Dict]:
-        """Generate focused flashcards for study purposes"""
-        try:
-            flashcards = []
-            sentences = self.text_processor.extract_sentences(text, min_length=15)
-            
-            # 1. Generate flashcards from concepts (highest priority)
-            for concept in key_concepts[:3]:
-                term = concept["term"]
-                definition = concept["definition"]
-                
-                # Definition flashcard
-                flashcards.append({
-                    "question": f"What is {term}?",
-                    "answer": definition,
-                    "type": "definition",
-                    "difficulty": "medium",
-                    "confidence": concept["confidence"],
-                    "source": "concept_extraction"
-                })
-                
-                # Reverse flashcard for shorter definitions
-                if len(definition) <= 80:
-                    flashcards.append({
-                        "question": f"Which term is defined as: '{definition[:60]}...'?",
-                        "answer": term,
-                        "type": "reverse_definition",
-                        "difficulty": "hard",
-                        "confidence": concept["confidence"] * 0.9,
-                        "source": "concept_extraction"
-                    })
-            
-            # 2. Generate flashcards from key phrases (if we need more)
-            if len(flashcards) < max_cards:
-                phrases = key_phrases_data.get("phrases", [])[:5]
-                
-                for phrase in phrases:
-                    if len(flashcards) >= max_cards:
-                        break
-                    
-                    # Find best explanatory sentence
-                    context_sentence = self._find_best_study_context(phrase, sentences)
-                    
-                    if context_sentence and self._is_good_study_content(context_sentence):
-                        flashcards.append({
-                            "question": f"Explain '{phrase}' based on your notes.",
-                            "answer": context_sentence,
-                            "type": "key_concept",
-                            "difficulty": "medium",
-                            "confidence": 0.75,
-                            "source": "key_phrases"
-                        })
-            
-            # 3. Generate comprehension flashcards (if still need more)
-            if len(flashcards) < max_cards and len(sentences) >= 2:
-                # Main topic flashcard
-                if sentences[0] and self._is_good_study_content(sentences[0]):
-                    flashcards.append({
-                        "question": "What is the main topic of these notes?",
-                        "answer": sentences[0],
-                        "type": "comprehension",
-                        "difficulty": "easy",
-                        "confidence": 0.7,
-                        "source": "comprehension"
-                    })
-                
-                # Important detail flashcard
-                if len(sentences) > 1:
-                    important_sentence = self._find_most_important_sentence(sentences[1:])
-                    if important_sentence:
-                        flashcards.append({
-                            "question": "What is an important detail to remember?",
-                            "answer": important_sentence,
-                            "type": "detail",
-                            "difficulty": "medium",
-                            "confidence": 0.65,
-                            "source": "comprehension"
-                        })
-            
-            # Remove duplicates and sort by confidence
-            unique_flashcards = self._remove_duplicate_flashcards(flashcards)
-            
-            return unique_flashcards[:max_cards]
-            
-        except Exception as e:
-            logger.error(f"Error generating study flashcards: {e}")
-            return []
-    
-    def _find_best_study_context(self, phrase: str, sentences: List[str]) -> str:
-        """Find the sentence that best explains a phrase for study purposes"""
-        relevant_sentences = []
-        
-        for sentence in sentences:
-            if phrase.lower() in sentence.lower():
-                score = 0
-                
-                # Prefer explanatory sentences
-                explanatory_words = ['is', 'are', 'means', 'refers', 'involves', 'includes', 'defines']
-                for word in explanatory_words:
-                    if word in sentence.lower():
-                        score += 2
-                
-                # Prefer study-relevant sentences
-                study_words = ['because', 'therefore', 'thus', 'since', 'example', 'instance']
-                for word in study_words:
-                    if word in sentence.lower():
-                        score += 1
-                
-                # Optimal length for study
-                word_count = len(sentence.split())
-                if 8 <= word_count <= 25:
-                    score += 2
-                elif 5 <= word_count <= 35:
-                    score += 1
-                
-                relevant_sentences.append((sentence, score))
-        
-        if relevant_sentences:
-            relevant_sentences.sort(key=lambda x: x[1], reverse=True)
-            return relevant_sentences[0][0]
-        
-        return None
-    
-    def _is_good_study_content(self, content: str) -> bool:
-        """Check if content is suitable for study flashcards"""
-        if not content or len(content.strip()) < 15:
-            return False
-        
-        word_count = len(content.split())
-        if word_count < 4 or word_count > 35:  # Study-optimized length
-            return False
-        
-        # Must have enough alphabetic content
-        alpha_ratio = sum(c.isalpha() for c in content) / len(content)
-        if alpha_ratio < 0.65:
-            return False
-        
-        # Avoid list-like content
-        if content.count(',') > 3 or content.count(';') > 1:
-            return False
-        
-        return True
-    
-    def _find_most_important_sentence(self, sentences: List[str]) -> str:
-        """Find the most important sentence for study purposes"""
-        scored_sentences = []
-        
-        for sentence in sentences:
-            if self._is_good_study_content(sentence):
-                score = self._calculate_study_sentence_score(sentence, sentences)
-                scored_sentences.append((sentence, score))
-        
-        if scored_sentences:
-            scored_sentences.sort(key=lambda x: x[1], reverse=True)
-            return scored_sentences[0][0]
-        
-        return None
-    
-    def _remove_duplicate_flashcards(self, flashcards: List[Dict]) -> List[Dict]:
-        """Remove duplicate flashcards"""
-        unique_cards = []
-        seen_questions = set()
-        seen_answers = set()
-        
-        for card in flashcards:
-            question = card.get("question", "").lower().strip()
-            answer = card.get("answer", "").lower().strip()
-            
-            # Check for exact duplicates
-            if question in seen_questions or answer in seen_answers:
-                continue
-            
-            # Check for very similar content
-            is_similar = False
-            for existing_card in unique_cards:
-                existing_q = existing_card.get("question", "").lower().strip()
-                existing_a = existing_card.get("answer", "").lower().strip()
-                
-                # Simple similarity check
-                if (self._text_similarity(question, existing_q) > 0.8 or
-                    self._text_similarity(answer, existing_a) > 0.8):
-                    is_similar = True
-                    break
-            
-            if not is_similar:
-                unique_cards.append(card)
-                seen_questions.add(question)
-                seen_answers.add(answer)
-        
-        return unique_cards
-    
-    def _text_similarity(self, text1: str, text2: str) -> float:
-        """Calculate simple text similarity"""
-        if not text1 or not text2:
-            return 0.0
-        
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-        
-        intersection = words1.intersection(words2)
-        union = words1.union(words2)
-        
-        if not union:
-            return 0.0
-        
-        return len(intersection) / len(union)
-    
-    def _split_text_for_processing(self, text: str, max_chunk_size: int = 5000) -> List[str]:
-        """Split text into chunks for Azure API"""
+            error_msg = f"Azure Language analysis failed: {str(e)}"
+            logger.error(error_msg)
+            return self._create_error_response(error_msg, text)
+
+    def _split_text_for_analysis(self, text: str, max_chunk_size: int = 5000) -> List[str]:
+        """Split text into chunks suitable for Azure Language Services"""
         if len(text) <= max_chunk_size:
             return [text]
-        
+
         chunks = []
         sentences = re.split(r'[.!?]+', text)
         current_chunk = ""
-        
+
         for sentence in sentences:
-            if len(current_chunk + sentence) <= max_chunk_size:
-                current_chunk += sentence + ". "
-            else:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            # Check if adding this sentence would exceed limit
+            if len(current_chunk) + len(sentence) + 1 > max_chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk.strip())
-                current_chunk = sentence + ". "
-        
+                    current_chunk = sentence
+                else:
+                    # Single sentence is too long, split by words
+                    words = sentence.split()
+                    for i in range(0, len(words), 100):  # 100 words per chunk
+                        word_chunk = ' '.join(words[i:i+100])
+                        chunks.append(word_chunk)
+            else:
+                current_chunk += (". " if current_chunk else "") + sentence
+
         if current_chunk:
             chunks.append(current_chunk.strip())
-        
-        return chunks if chunks else [text[:max_chunk_size]]
-    
-    def _calculate_sentence_frequency_score(self, sentence: str, word_freq: Dict[str, int]) -> float:
-        """Calculate sentence score based on word frequencies"""
-        words = re.findall(r'\b[a-zA-Z]+\b', sentence.lower())
-        if not words:
-            return 0.0
-        
-        total_score = sum(word_freq.get(word, 0) for word in words)
-        return total_score / len(words)
-    
-    def _compile_metadata(self, results: Dict, cleaned_text: str, original_text: str) -> Dict:
-        """Compile metadata about the analysis"""
+
+        return chunks
+
+    def _extract_key_phrases_focused(self, text_chunks: List[str], full_text: str) -> Dict:
+        """Extract key phrases with focus on study-relevant content"""
         try:
+            all_key_phrases = []
+            confidence_scores = []
+
+            # Process chunks through Azure
+            for chunk in text_chunks:
+                if len(chunk.strip()) < 10:
+                    continue
+
+                try:
+                    response = self.client.extract_key_phrases(documents=[chunk])
+                    
+                    for doc in response:
+                        if not doc.is_error:
+                            for phrase in doc.key_phrases:
+                                # Filter for study relevance
+                                if self._is_study_relevant_phrase(phrase):
+                                    all_key_phrases.append(phrase)
+                                    # Calculate importance score
+                                    importance = self._calculate_study_importance(phrase, full_text)
+                                    confidence_scores.append(importance)
+                        else:
+                            logger.warning(f"Key phrase extraction error: {doc.error}")
+
+                except Exception as e:
+                    logger.warning(f"Error processing chunk for key phrases: {e}")
+                    continue
+
+            # Remove duplicates and sort by importance
+            phrase_scores = list(zip(all_key_phrases, confidence_scores))
+            unique_phrases = {}
+            for phrase, score in phrase_scores:
+                if phrase not in unique_phrases or score > unique_phrases[phrase]:
+                    unique_phrases[phrase] = score
+
+            # Sort by importance
+            sorted_phrases = sorted(unique_phrases.items(), key=lambda x: x[1], reverse=True)
+
+            # Also extract concepts using local processing
+            local_concepts = self.text_processor.extract_key_concepts(full_text)
+
             return {
-                "analysis_timestamp": datetime.datetime.now().isoformat(),
-                "text_statistics": {
-                    "original_character_count": len(original_text),
-                    "cleaned_character_count": len(cleaned_text),
-                    "cleaning_efficiency": len(cleaned_text) / len(original_text) if len(original_text) > 0 else 0,
-                    "word_count": len(cleaned_text.split()),
-                    "sentence_count": len(self.text_processor.extract_sentences(cleaned_text))
+                "azure_key_phrases": [phrase for phrase, score in sorted_phrases[:15]],
+                "local_concepts": local_concepts[:10],
+                "phrase_importance_scores": dict(sorted_phrases[:15]),
+                "total_phrases_found": len(all_key_phrases),
+                "study_relevant_phrases": len([p for p in all_key_phrases if self._is_study_relevant_phrase(p)])
+            }
+
+        except Exception as e:
+            logger.error(f"Key phrase extraction error: {e}")
+            return {
+                "azure_key_phrases": [],
+                "local_concepts": self.text_processor.extract_key_concepts(full_text),
+                "error": str(e)
+            }
+
+    def _is_study_relevant_phrase(self, phrase: str) -> bool:
+        """Determine if a phrase is relevant for study materials"""
+        phrase_lower = phrase.lower()
+        
+        # Filter out common non-study phrases
+        irrelevant_patterns = [
+            r'^(the|a|an|and|or|but|in|on|at|to|for|of|with|by)$',
+            r'^\d+$',  # Pure numbers
+            r'^(page|chapter|section)\s+\d+$',  # Page references
+            r'^(figure|table|diagram)\s+\d+$',  # Figure references
+        ]
+        
+        for pattern in irrelevant_patterns:
+            if re.match(pattern, phrase_lower):
+                return False
+        
+        # Prefer phrases that indicate concepts
+        study_indicators = [
+            'concept', 'theory', 'principle', 'method', 'process', 'technique',
+            'definition', 'formula', 'equation', 'rule', 'law', 'property',
+            'characteristic', 'feature', 'example', 'application', 'use'
+        ]
+        
+        # Check if phrase contains study indicators
+        for indicator in study_indicators:
+            if indicator in phrase_lower:
+                return True
+        
+        # Check phrase length and complexity
+        if 2 <= len(phrase.split()) <= 4 and len(phrase) >= 5:
+            return True
+        
+        return False
+
+    def _calculate_study_importance(self, phrase: str, full_text: str) -> float:
+        """Calculate importance score for a phrase in study context"""
+        try:
+            # Base importance
+            importance = 0.5
+            
+            # Frequency in text (normalized)
+            frequency = full_text.lower().count(phrase.lower())
+            frequency_score = min(0.3, frequency / 10)  # Cap at 0.3
+            importance += frequency_score
+            
+            # Length bonus (moderate length preferred)
+            word_count = len(phrase.split())
+            if 2 <= word_count <= 3:
+                importance += 0.2
+            elif word_count == 4:
+                importance += 0.1
+            
+            # Capitalization bonus (proper nouns/concepts)
+            if phrase[0].isupper():
+                importance += 0.1
+            
+            # Study keyword bonus
+            study_keywords = [
+                'concept', 'theory', 'principle', 'method', 'process',
+                'definition', 'formula', 'example', 'application'
+            ]
+            for keyword in study_keywords:
+                if keyword in phrase.lower():
+                    importance += 0.15
+                    break
+            
+            return min(importance, 1.0)  # Cap at 1.0
+            
+        except Exception:
+            return 0.5
+
+    def _generate_enhanced_summary(self, cleaned_text: str, text_chunks: List[str]) -> Dict:
+        """Generate enhanced summary optimized for study materials"""
+        try:
+            # Use Azure extractive summarization if available
+            azure_summary = None
+            if len(cleaned_text) > 200:
+                try:
+                    # For longer texts, use Azure's summarization
+                    from azure.ai.textanalytics import ExtractiveSummaryAction
+                    
+                    # Create summarization request
+                    actions = [ExtractiveSummaryAction(max_sentence_count=5)]
+                    poller = self.client.begin_analyze_actions(
+                        documents=[cleaned_text[:10000]],  # Limit for API
+                        actions=actions
+                    )
+                    
+                    result = poller.result()
+                    for result_page in result:
+                        for action_result in result_page:
+                            if not action_result.is_error:
+                                sentences = [sentence.text for sentence in action_result.sentences]
+                                azure_summary = ' '.join(sentences)
+                                break
+                
+                except Exception as e:
+                    logger.warning(f"Azure summarization failed: {e}")
+
+            # Generate concept-based summary using local processing
+            concept_summary = self._concept_based_summarization(cleaned_text)
+
+            # Create comprehensive summary
+            summary_result = {
+                "azure_extractive_summary": azure_summary,
+                "concept_based_summary": concept_summary,
+                "key_sentences": self._extract_key_sentences(cleaned_text),
+                "summary_length": len(azure_summary) if azure_summary else len(concept_summary.get("summary", "")),
+                "compression_ratio": self._calculate_compression_ratio(cleaned_text, azure_summary or concept_summary.get("summary", ""))
+            }
+
+            return summary_result
+
+        except Exception as e:
+            logger.error(f"Summary generation error: {e}")
+            return {
+                "error": str(e),
+                "concept_based_summary": self._concept_based_summarization(cleaned_text)
+            }
+
+    def _concept_based_summarization(self, text: str) -> Dict:
+        """Generate concept-based summary for study materials"""
+        try:
+            sentences = re.split(r'[.!?]+', text)
+            meaningful_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+            
+            # Score sentences based on study relevance
+            sentence_scores = []
+            for sentence in meaningful_sentences:
+                score = self._score_sentence_for_study(sentence, text)
+                sentence_scores.append((sentence, score))
+            
+            # Sort by score and take top sentences
+            sorted_sentences = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
+            top_sentences = [s[0] for s in sorted_sentences[:5]]
+            
+            # Create summary
+            summary_text = '. '.join(top_sentences) + '.' if top_sentences else ""
+            
+            return {
+                "summary": summary_text,
+                "top_sentences": top_sentences,
+                "sentence_count": len(meaningful_sentences),
+                "selected_count": len(top_sentences)
+            }
+            
+        except Exception as e:
+            logger.warning(f"Concept summarization error: {e}")
+            return {"summary": text[:500] + "..." if len(text) > 500 else text}
+
+    def _score_sentence_for_study(self, sentence: str, full_text: str) -> float:
+        """Score a sentence for its study material relevance"""
+        score = 0.0
+        sentence_lower = sentence.lower()
+        
+        # Study keyword indicators
+        study_keywords = {
+            'definition': 1.0, 'concept': 0.9, 'theory': 0.9, 'principle': 0.8,
+            'method': 0.7, 'process': 0.7, 'example': 0.6, 'application': 0.6,
+            'important': 0.8, 'significant': 0.7, 'key': 0.6, 'main': 0.5
+        }
+        
+        for keyword, weight in study_keywords.items():
+            if keyword in sentence_lower:
+                score += weight
+        
+        # Position bonus (first and last sentences often important)
+        sentences = re.split(r'[.!?]+', full_text)
+        if sentence in sentences[:3]:  # First 3 sentences
+            score += 0.3
+        elif sentence in sentences[-3:]:  # Last 3 sentences
+            score += 0.2
+        
+        # Length penalty/bonus
+        word_count = len(sentence.split())
+        if 10 <= word_count <= 30:  # Optimal length
+            score += 0.2
+        elif word_count < 5:  # Too short
+            score -= 0.3
+        elif word_count > 50:  # Too long
+            score -= 0.2
+        
+        # Capitalization bonus (proper nouns)
+        capitalized_words = [word for word in sentence.split() if word[0].isupper()]
+        if len(capitalized_words) > 1:
+            score += 0.1
+        
+        return score
+
+    def _extract_key_sentences(self, text: str) -> List[str]:
+        """Extract key sentences for study focus"""
+        sentences = re.split(r'[.!?]+', text)
+        meaningful_sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+        
+        # Look for sentences with strong study indicators
+        key_sentences = []
+        for sentence in meaningful_sentences:
+            if any(indicator in sentence.lower() for indicator in [
+                'definition', 'concept', 'important', 'key', 'main', 'primary',
+                'theory', 'principle', 'method', 'process', 'example'
+            ]):
+                key_sentences.append(sentence)
+        
+        return key_sentences[:7]  # Return top 7 key sentences
+
+    def _calculate_compression_ratio(self, original: str, summary: str) -> float:
+        """Calculate compression ratio of summary"""
+        if not original or not summary:
+            return 0.0
+        return round(len(summary) / len(original), 3)
+
+    def _analyze_sentiment(self, text_chunks: List[str]) -> Dict:
+        """Analyze sentiment and tone of the content"""
+        try:
+            sentiments = []
+            confidences = []
+            
+            for chunk in text_chunks:
+                if len(chunk.strip()) < 10:
+                    continue
+                
+                try:
+                    response = self.client.analyze_sentiment(documents=[chunk])
+                    
+                    for doc in response:
+                        if not doc.is_error:
+                            sentiments.append(doc.sentiment)
+                            confidences.append(doc.confidence_scores)
+                        else:
+                            logger.warning(f"Sentiment analysis error: {doc.error}")
+                
+                except Exception as e:
+                    logger.warning(f"Error in sentiment analysis: {e}")
+                    continue
+            
+            # Aggregate results
+            if sentiments:
+                overall_sentiment = max(set(sentiments), key=sentiments.count)
+                avg_confidence = {
+                    "positive": sum(c.positive for c in confidences) / len(confidences),
+                    "neutral": sum(c.neutral for c in confidences) / len(confidences),
+                    "negative": sum(c.negative for c in confidences) / len(confidences)
+                }
+            else:
+                overall_sentiment = "neutral"
+                avg_confidence = {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
+            
+            return {
+                "overall_sentiment": overall_sentiment,
+                "confidence_scores": avg_confidence,
+                "sentiment_distribution": {sentiment: sentiments.count(sentiment) for sentiment in set(sentiments)},
+                "study_tone_assessment": self._assess_study_tone(overall_sentiment, avg_confidence)
+            }
+            
+        except Exception as e:
+            logger.error(f"Sentiment analysis error: {e}")
+            return {
+                "overall_sentiment": "neutral",
+                "error": str(e),
+                "study_tone_assessment": "unknown"
+            }
+
+    def _assess_study_tone(self, sentiment: str, confidence: Dict) -> str:
+        """Assess if the tone is appropriate for study materials"""
+        if sentiment == "neutral" and confidence["neutral"] > 0.7:
+            return "academic"
+        elif sentiment == "positive" and confidence["positive"] > 0.6:
+            return "engaging"
+        elif sentiment == "negative":
+            return "critical_analysis"
+        else:
+            return "mixed"
+
+    def _extract_entities(self, text_chunks: List[str]) -> Dict:
+        """Extract named entities relevant to study materials"""
+        try:
+            all_entities = []
+            
+            for chunk in text_chunks:
+                if len(chunk.strip()) < 10:
+                    continue
+                
+                try:
+                    response = self.client.recognize_entities(documents=[chunk])
+                    
+                    for doc in response:
+                        if not doc.is_error:
+                            for entity in doc.entities:
+                                # Filter for study-relevant entity types
+                                if entity.category in ['Person', 'Organization', 'Location', 'Event', 'Product', 'Skill']:
+                                    all_entities.append({
+                                        "text": entity.text,
+                                        "category": entity.category,
+                                        "confidence": entity.confidence_score,
+                                        "subcategory": getattr(entity, 'subcategory', None)
+                                    })
+                        else:
+                            logger.warning(f"Entity recognition error: {doc.error}")
+                
+                except Exception as e:
+                    logger.warning(f"Error in entity recognition: {e}")
+                    continue
+            
+            # Group entities by category
+            entities_by_category = {}
+            for entity in all_entities:
+                category = entity["category"]
+                if category not in entities_by_category:
+                    entities_by_category[category] = []
+                entities_by_category[category].append(entity)
+            
+            # Remove duplicates and sort by confidence
+            for category in entities_by_category:
+                seen_texts = set()
+                unique_entities = []
+                for entity in sorted(entities_by_category[category], key=lambda x: x["confidence"], reverse=True):
+                    if entity["text"] not in seen_texts:
+                        unique_entities.append(entity)
+                        seen_texts.add(entity["text"])
+                entities_by_category[category] = unique_entities[:5]  # Top 5 per category
+            
+            return {
+                "entities_by_category": entities_by_category,
+                "total_entities": len(all_entities),
+                "unique_entities": sum(len(entities) for entities in entities_by_category.values()),
+                "study_relevant_entities": self._filter_study_relevant_entities(entities_by_category)
+            }
+            
+        except Exception as e:
+            logger.error(f"Entity extraction error: {e}")
+            return {
+                "entities_by_category": {},
+                "error": str(e)
+            }
+
+    def _filter_study_relevant_entities(self, entities_by_category: Dict) -> Dict:
+        """Filter entities most relevant for study materials"""
+        study_relevant = {}
+        
+        # Priority categories for study materials
+        priority_categories = ['Person', 'Organization', 'Event', 'Product']
+        
+        for category in priority_categories:
+            if category in entities_by_category:
+                # Filter high-confidence entities
+                relevant_entities = [
+                    entity for entity in entities_by_category[category]
+                    if entity["confidence"] > 0.7
+                ]
+                if relevant_entities:
+                    study_relevant[category] = relevant_entities
+        
+        return study_relevant
+
+    def _assess_study_quality(self, text: str, key_phrases: Dict, entities: Dict) -> Dict:
+        """Assess overall quality of content for study purposes"""
+        try:
+            # Text complexity assessment
+            complexity = self.text_processor.assess_text_complexity(text)
+            
+            # Content richness assessment
+            phrase_count = len(key_phrases.get("azure_key_phrases", []))
+            entity_count = entities.get("unique_entities", 0)
+            study_phrases = key_phrases.get("study_relevant_phrases", 0)
+            
+            # Calculate study quality score
+            quality_score = 0.0
+            
+            # Text length contribution (20%)
+            word_count = len(text.split())
+            if 200 <= word_count <= 5000:
+                quality_score += 0.2
+            elif word_count > 5000:
+                quality_score += 0.15
+            elif word_count > 50:
+                quality_score += 0.1
+            
+            # Content richness (30%)
+            if phrase_count > 10:
+                quality_score += 0.15
+            elif phrase_count > 5:
+                quality_score += 0.1
+            
+            if entity_count > 5:
+                quality_score += 0.15
+            elif entity_count > 2:
+                quality_score += 0.1
+            
+            # Study relevance (30%)
+            if study_phrases > phrase_count * 0.6:  # >60% study relevant
+                quality_score += 0.3
+            elif study_phrases > phrase_count * 0.4:  # >40% study relevant
+                quality_score += 0.2
+            elif study_phrases > 0:
+                quality_score += 0.1
+            
+            # Readability (20%)
+            reading_level = complexity.get("reading_level", "medium")
+            if reading_level in ["easy", "medium"]:
+                quality_score += 0.2
+            elif reading_level == "hard":
+                quality_score += 0.1
+            
+            # Determine overall quality
+            if quality_score >= 0.8:
+                overall_quality = "excellent"
+            elif quality_score >= 0.6:
+                overall_quality = "good"
+            elif quality_score >= 0.4:
+                overall_quality = "fair"
+            else:
+                overall_quality = "poor"
+            
+            return {
+                "overall_quality": overall_quality,
+                "quality_score": round(quality_score, 2),
+                "content_metrics": {
+                    "word_count": word_count,
+                    "key_phrases_count": phrase_count,
+                    "entities_count": entity_count,
+                    "study_relevant_phrases": study_phrases
                 },
-                "analysis_results": {
-                    "key_phrases_extracted": len(results.get("key_phrases", {}).get("phrases", [])),
-                    "summary_generated": results.get("summary", {}).get("status") == "success",
-                    "flashcards_created": len(results.get("flashcards", []))
+                "recommendations": self._generate_quality_recommendations(quality_score, complexity, phrase_count)
+            }
+            
+        except Exception as e:
+            logger.error(f"Study quality assessment error: {e}")
+            return {"error": str(e), "overall_quality": "unknown"}
+
+    def _generate_quality_recommendations(self, quality_score: float, complexity: Dict, phrase_count: int) -> List[str]:
+        """Generate recommendations for improving study material quality"""
+        recommendations = []
+        
+        if quality_score < 0.4:
+            recommendations.append("Consider using more detailed source material")
+        
+        if phrase_count < 5:
+            recommendations.append("Content may benefit from more key concepts and terms")
+        
+        reading_level = complexity.get("reading_level", "medium")
+        if reading_level == "hard":
+            recommendations.append("Content complexity is high - consider breaking into smaller sections")
+        
+        word_count = complexity.get("word_count", 0)
+        if word_count < 100:
+            recommendations.append("Content is quite short - additional material may improve flashcard generation")
+        elif word_count > 10000:
+            recommendations.append("Content is very long - consider processing in smaller sections")
+        
+        if not recommendations:
+            recommendations.append("Content quality is good for flashcard generation")
+        
+        return recommendations
+
+    def _generate_flashcard_recommendations(self, text: str, key_phrases: Dict, entities: Dict, study_assessment: Dict) -> Dict:
+        """Generate specific recommendations for flashcard creation"""
+        try:
+            recommendations = {
+                "recommended_types": [],
+                "optimal_count": 0,
+                "difficulty_distribution": {},
+                "content_focus_areas": [],
+                "generation_strategy": ""
+            }
+            
+            # Determine recommended flashcard types based on content
+            phrase_count = len(key_phrases.get("azure_key_phrases", []))
+            entity_count = entities.get("unique_entities", 0)
+            quality = study_assessment.get("overall_quality", "unknown")
+            
+            # Type recommendations
+            if phrase_count > 8:
+                recommendations["recommended_types"].extend(["definition", "conceptual"])
+            if entity_count > 3:
+                recommendations["recommended_types"].append("detail")
+            if "example" in text.lower() or "application" in text.lower():
+                recommendations["recommended_types"].append("application")
+            
+            # Default types if none detected
+            if not recommendations["recommended_types"]:
+                recommendations["recommended_types"] = ["definition", "conceptual"]
+            
+            # Optimal count based on content length and quality
+            word_count = len(text.split())
+            if quality == "excellent":
+                recommendations["optimal_count"] = min(15, max(5, word_count // 200))
+            elif quality == "good":
+                recommendations["optimal_count"] = min(12, max(4, word_count // 250))
+            else:
+                recommendations["optimal_count"] = min(8, max(3, word_count // 300))
+            
+            # Difficulty distribution
+            complexity_level = study_assessment.get("content_metrics", {}).get("complexity", "medium")
+            if complexity_level == "easy":
+                recommendations["difficulty_distribution"] = {"easy": 60, "medium": 30, "hard": 10}
+            elif complexity_level == "hard":
+                recommendations["difficulty_distribution"] = {"easy": 20, "medium": 40, "hard": 40}
+            else:
+                recommendations["difficulty_distribution"] = {"easy": 40, "medium": 40, "hard": 20}
+            
+            # Content focus areas
+            top_phrases = key_phrases.get("azure_key_phrases", [])[:5]
+            entity_categories = list(entities.get("entities_by_category", {}).keys())
+            
+            recommendations["content_focus_areas"] = top_phrases + entity_categories
+            
+            # Generation strategy
+            if quality in ["excellent", "good"]:
+                recommendations["generation_strategy"] = "comprehensive"
+            else:
+                recommendations["generation_strategy"] = "focused"
+            
+            return recommendations
+            
+        except Exception as e:
+            logger.error(f"Flashcard recommendations error: {e}")
+            return {
+                "recommended_types": ["definition", "conceptual"],
+                "optimal_count": 5,
+                "error": str(e)
+            }
+
+    def _create_fallback_analysis(self, text: str) -> Dict:
+        """Create fallback analysis when Azure is not available"""
+        logger.info("🔄 Creating fallback analysis without Azure Language Service...")
+        
+        try:
+            # Clean text using local processor
+            cleaned_text = self.text_processor.clean_ocr_text(text)
+            
+            # Extract concepts locally
+            local_concepts = self.text_processor.extract_key_concepts(cleaned_text)
+            
+            # Assess complexity
+            complexity = self.text_processor.assess_text_complexity(cleaned_text)
+            
+            # Create basic summary
+            sentences = re.split(r'[.!?]+', cleaned_text)
+            meaningful_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+            basic_summary = '. '.join(meaningful_sentences[:3]) + '.' if meaningful_sentences else cleaned_text[:200]
+            
+            return {
+                "status": "fallback",
+                "cleaned_text": cleaned_text,
+                "key_phrases": {
+                    "local_concepts": local_concepts,
+                    "azure_key_phrases": [],
+                    "fallback_used": True
                 },
-                "quality_indicators": {
-                    "text_length_adequate": len(cleaned_text) > 100,
-                    "has_structure": len(self.text_processor.extract_sentences(cleaned_text)) > 3,
-                    "summary_method": results.get("summary", {}).get("method", "none"),
-                    "study_ready": True
+                "summary": {
+                    "concept_based_summary": {"summary": basic_summary},
+                    "azure_extractive_summary": None
                 },
-                "processing_info": {
-                    "azure_language_service": "Azure Text Analytics",
-                    "enhancement_version": "2.0_streamlined",
-                    "api_region": "East US",
-                    "features_used": [
-                        "enhanced_text_cleaning",
-                        "concept_extraction",
-                        "focused_summarization", 
-                        "study_flashcard_generation",
-                        "key_phrase_extraction"
-                    ]
+                "sentiment": {
+                    "overall_sentiment": "neutral",
+                    "study_tone_assessment": "academic"
+                },
+                "entities": {"entities_by_category": {}},
+                "text_complexity": complexity,
+                "study_assessment": {
+                    "overall_quality": "fair",
+                    "quality_score": 0.5,
+                    "recommendations": ["Azure Language Service not available - using local processing"]
+                },
+                "flashcard_recommendations": {
+                    "recommended_types": ["definition", "conceptual"],
+                    "optimal_count": min(8, max(3, len(cleaned_text.split()) // 300)),
+                    "generation_strategy": "basic"
+                },
+                "processing_metadata": {
+                    "azure_available": False,
+                    "fallback_used": True,
+                    "local_processing_only": True
                 }
             }
             
         except Exception as e:
-            logger.error(f"Error compiling metadata: {e}")
-            return {"error": str(e)}
-    
-    def _create_fallback_result(self, error_message: str) -> Dict:
-        """Create fallback result when analysis fails"""
+            logger.error(f"Fallback analysis failed: {e}")
+            return {"error": f"Analysis failed: {e}", "status": "error"}
+
+    def _create_error_response(self, error_message: str, original_text: str) -> Dict:
+        """Create standardized error response"""
         return {
-            "summary": {"status": "failed", "error": error_message},
-            "key_phrases": {"status": "failed", "error": error_message, "phrases": []},
-            "flashcards": [],
-            "metadata": {
-                "analysis_failed": True,
-                "error": error_message,
-                "fallback_used": True
-            },
-            "processed_text": ""
+            "status": "error",
+            "error": error_message,
+            "fallback_analysis": self._create_fallback_analysis(original_text),
+            "processing_metadata": {
+                "error_occurred": True,
+                "azure_available": self.is_available,
+                "timestamp": datetime.now().isoformat()
+            }
         }
 
 # Create global instance

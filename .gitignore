@@ -2,3 +2,4 @@ venv
 .env
 __pycache__
 cache
+flashcard_app.log
