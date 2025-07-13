@@ -1,380 +1,357 @@
 import streamlit as st
 import hashlib
 import json
+import os
+import io 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Optional, Any
 from datetime import datetime
-import mimetypes
 from PIL import Image
-import io
 
 from config import Config
 
-# Setup logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FileHandler:
     """
-    Enhanced file upload, validation, and processing handler
-    
-    This class manages:
-    - File upload interface with Streamlit
-    - File validation and security checks
-    - File metadata extraction
-    - Cache management for processed files
-    - Integration with Azure processing pipeline
+    FIXED: File upload, validation, and processing handler with no duplicate displays
     """
     
     def __init__(self):
-        """Initialize FileHandler with configuration"""
-        self.max_size_bytes = Config.MAX_FILE_SIZE_BYTES
-        self.supported_types = Config.SUPPORTED_FILE_TYPES
-        self.cache_enabled = Config.CACHE_ENABLED
-        self.cache_dir = Config.CACHE_DIR / "files"
-        
-        # Ensure cache directory exists
-        if self.cache_enabled:
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        # MIME type mapping for validation
-        self.mime_type_map = {
-            'pdf': 'application/pdf',
-            'txt': 'text/plain',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png'
-        }
-        
-        logger.info("📁 FileHandler initialized successfully")
+        # Create cache directory if it doesn't exist
+        self.cache_dir = Path("cache/files")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
     
     def create_upload_interface(self) -> Optional[Dict[str, Any]]:
-        """
-        Creates the enhanced Streamlit file upload interface
+        """FIXED: Complete file upload interface with no duplicate displays"""
         
-        Returns:
-            Dict containing uploaded file data and metadata, or None if no file
-        """
-        st.subheader("📁 Upload Your Document")
-        
-        # Show supported file types with enhanced info
-        with st.expander("ℹ️ What files can I upload?", expanded=False):
-            st.write("**Supported formats:**")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("📄 **Text Documents:**")
-                st.write("- PDF files (.pdf)")
-                st.write("- Word documents (.docx)")
-                st.write("- Text files (.txt)")
-            
-            with col2:
-                st.write("🖼️ **Images with Text:**")
-                st.write("- JPEG images (.jpg, .jpeg)")
-                st.write("- PNG images (.png)")
-                st.write("- Handwritten or printed text")
-            
-            st.write(f"📏 **File Limits:**")
-            st.write(f"- Maximum size: {Config.MAX_FILE_SIZE_MB} MB")
-            st.write(f"- Best quality: High resolution, clear text")
-            st.write(f"- Supported text: English (optimized)")
-        
-        # Enhanced file uploader widget
         uploaded_file = st.file_uploader(
-            "Choose a file to analyze",
-            type=self.supported_types,
-            help=f"Max size: {Config.MAX_FILE_SIZE_MB}MB. Supported: {', '.join(self.supported_types)}",
-            key="main_file_uploader"
+            "Choose a file",
+            type=Config.SUPPORTED_FILE_TYPES,
+            help=f"Maximum file size: {Config.MAX_FILE_SIZE_MB}MB"
         )
         
         if uploaded_file is not None:
-            # Process the uploaded file
             return self._process_uploaded_file(uploaded_file)
         
         return None
     
     def _process_uploaded_file(self, uploaded_file) -> Dict[str, Any]:
-        """
-        Process and validate uploaded file
-        
-        Args:
-            uploaded_file: Streamlit UploadedFile object
-            
-        Returns:
-            Dict containing processed file data and metadata
-        """
+        """FIXED: Process uploaded file with single display of file info"""
         try:
-            # Show processing indicator
-            with st.spinner("🔍 Processing uploaded file..."):
-                
-                # Step 1: Basic validation
-                validation_result = self.validate_file(uploaded_file)
-                if not validation_result["is_valid"]:
-                    st.error(f"❌ {validation_result['error_message']}")
-                    return {"error": validation_result["error_message"]}
-                
-                # Step 2: Extract file metadata
-                file_metadata = self._extract_file_metadata(uploaded_file)
-                
-                # Step 3: Check cache
-                file_hash = self._calculate_file_hash(uploaded_file.getvalue())
-                cached_result = self._get_cached_result(file_hash) if self.cache_enabled else None
-                
-                if cached_result:
-                    st.success("⚡ Found cached analysis - Loading instantly!")
-                    cached_result["metadata"]["source"] = "cache"
-                    self._display_file_info(file_metadata, cached=True)
-                    return cached_result
-                
-                # Step 4: Prepare file for processing
-                processed_data = self._prepare_file_for_processing(uploaded_file, file_metadata)
-                
-                # Step 5: Display file information
-                self._display_file_info(file_metadata)
-                
-                st.success("✅ File uploaded and validated successfully!")
-                
-                return {
-                    "file_data": processed_data,
-                    "metadata": file_metadata,
-                    "file_hash": file_hash,
-                    "status": "ready_for_processing"
-                }
-                
+            # Step 1: Validate file
+            validation_result = self.validate_file(uploaded_file)
+            
+            if not validation_result['valid']:
+                return {"error": validation_result['error']}
+            
+            # Step 2: Extract metadata
+            metadata = self._extract_basic_metadata(uploaded_file)
+            
+            # Step 3: Check cache
+            file_hash = self._calculate_file_hash(uploaded_file.getvalue())
+            cached_result = self._check_cache_simple(file_hash)
+            
+            # Step 4: Prepare for processing
+            file_data = self._prepare_for_processing(uploaded_file, metadata)
+            
+            if 'error' in file_data:
+                return {"error": file_data['error']}
+            
+            # FIXED: Single display of cache info (no duplicate file metrics)
+            if cached_result:
+                st.info("⚡ Found cached results - processing will be faster!")
+                metadata['cache_hit'] = True
+                metadata['cached_result'] = cached_result
+            
+            return {
+                "file_data": file_data,
+                "metadata": metadata,
+                "file_hash": file_hash,
+                "status": "ready_for_processing"
+            }
+            
         except Exception as e:
-            error_msg = f"Error processing file: {str(e)}"
-            logger.error(error_msg)
-            st.error(f"❌ {error_msg}")
-            return {"error": error_msg}
+            logger.error(f"File processing error: {e}")
+            return {"error": f"File processing failed: {str(e)}"}
     
     def validate_file(self, uploaded_file) -> Dict[str, Any]:
-        """
-        Comprehensive file validation
-        
-        Args:
-            uploaded_file: Streamlit UploadedFile object
-            
-        Returns:
-            Dict with validation results
-        """
+        """Validate uploaded file with comprehensive checks"""
         try:
             # Check file size
-            if uploaded_file.size > self.max_size_bytes:
+            if uploaded_file.size > Config.MAX_FILE_SIZE_BYTES:
                 return {
-                    "is_valid": False,
-                    "error_message": f"File too large. Maximum size is {Config.MAX_FILE_SIZE_MB}MB, your file is {uploaded_file.size / (1024*1024):.1f}MB"
+                    'valid': False,
+                    'error': f"File too large. Maximum size: {Config.MAX_FILE_SIZE_MB}MB"
                 }
             
-            # Check file extension
+            # Check minimum file size
+            if uploaded_file.size < 100:  # Less than 100 bytes
+                return {
+                    'valid': False,
+                    'error': "File too small or empty"
+                }
+            
+            # Check file type
             file_extension = uploaded_file.name.split('.')[-1].lower()
-            if file_extension not in self.supported_types:
+            if not Config.validate_file_type(file_extension):
                 return {
-                    "is_valid": False,
-                    "error_message": f"Unsupported file type '.{file_extension}'. Supported types: {', '.join(self.supported_types)}"
-                }
-            
-            # Check MIME type for security
-            file_bytes = uploaded_file.getvalue()
-            detected_mime = self._detect_mime_type(file_bytes, file_extension)
-            expected_mime = self.mime_type_map.get(file_extension)
-            
-            if expected_mime and detected_mime and not detected_mime.startswith(expected_mime.split('/')[0]):
-                return {
-                    "is_valid": False,
-                    "error_message": f"File content doesn't match extension. Expected {expected_mime}, detected {detected_mime}"
+                    'valid': False,
+                    'error': f"Unsupported file type. Supported: {', '.join(Config.SUPPORTED_FILE_TYPES)}"
                 }
             
             # Additional validation for images
             if file_extension in ['jpg', 'jpeg', 'png']:
-                image_validation = self._validate_image(file_bytes)
-                if not image_validation["is_valid"]:
+                image_validation = self._validate_image_comprehensive(uploaded_file.getvalue())
+                if not image_validation['valid']:
                     return image_validation
             
-            # File name validation
-            if len(uploaded_file.name) > 255:
-                return {
-                    "is_valid": False,
-                    "error_message": "File name too long (maximum 255 characters)"
-                }
+            # Validate PDF files
+            if file_extension == 'pdf':
+                pdf_validation = self._validate_pdf_basic(uploaded_file.getvalue())
+                if not pdf_validation['valid']:
+                    return pdf_validation
             
-            return {
-                "is_valid": True,
-                "file_extension": file_extension,
-                "detected_mime": detected_mime,
-                "file_size_mb": uploaded_file.size / (1024 * 1024)
-            }
+            return {'valid': True}
             
         except Exception as e:
-            logger.error(f"File validation error: {e}")
             return {
-                "is_valid": False,
-                "error_message": f"Validation error: {str(e)}"
+                'valid': False,
+                'error': f"File validation failed: {str(e)}"
             }
     
-    def _validate_image(self, file_bytes: bytes) -> Dict[str, Any]:
-        """Validate image files for OCR suitability"""
+    def _validate_image_comprehensive(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Enhanced image validation"""
         try:
             image = Image.open(io.BytesIO(file_bytes))
             
             # Check image dimensions
-            width, height = image.size
-            
-            # Minimum resolution for decent OCR
-            if width < 200 or height < 200:
+            if image.width < 50 or image.height < 50:
                 return {
-                    "is_valid": False,
-                    "error_message": f"Image resolution too low ({width}x{height}). Minimum recommended: 200x200 pixels for better text recognition."
+                    'valid': False,
+                    'error': "Image too small for text extraction (minimum 50x50 pixels)"
                 }
             
-            # Maximum resolution to prevent memory issues
-            if width > 10000 or height > 10000:
+            # Check if image is too large (memory consideration)
+            if image.width * image.height > 50_000_000:  # 50 megapixels
                 return {
-                    "is_valid": False,
-                    "error_message": f"Image resolution too high ({width}x{height}). Maximum supported: 10000x10000 pixels."
+                    'valid': False,
+                    'error': "Image too large for processing (max 50MP)"
                 }
             
-            # Check if image has reasonable aspect ratio
-            aspect_ratio = max(width, height) / min(width, height)
-            if aspect_ratio > 10:
+            # Check image mode
+            if image.mode not in ['RGB', 'RGBA', 'L', 'P']:
                 return {
-                    "is_valid": False,
-                    "error_message": f"Unusual aspect ratio ({aspect_ratio:.1f}:1). Images should be reasonably proportioned for best OCR results."
+                    'valid': False,
+                    'error': f"Unsupported image mode: {image.mode}"
                 }
             
-            return {
-                "is_valid": True,
-                "image_info": {
-                    "dimensions": f"{width}x{height}",
-                    "mode": image.mode,
-                    "format": image.format
-                }
-            }
+            return {'valid': True}
             
         except Exception as e:
             return {
-                "is_valid": False,
-                "error_message": f"Invalid image file: {str(e)}"
+                'valid': False,
+                'error': f"Invalid image file: {str(e)}"
             }
     
-    def _detect_mime_type(self, file_bytes: bytes, extension: str) -> Optional[str]:
-        """Detect MIME type from file content"""
+    def _validate_pdf_basic(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Basic PDF validation"""
         try:
-            # Check magic numbers for common file types
-            if file_bytes.startswith(b'%PDF'):
-                return 'application/pdf'
-            elif file_bytes.startswith(b'\xFF\xD8\xFF'):
-                return 'image/jpeg'
-            elif file_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
-                return 'image/png'
-            elif file_bytes.startswith(b'PK\x03\x04') and extension == 'docx':
-                return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            else:
-                # Fallback to text for txt files
-                if extension == 'txt':
-                    return 'text/plain'
-                return None
-                
-        except Exception:
-            return None
+            # Check PDF magic number
+            if not file_bytes.startswith(b'%PDF-'):
+                return {
+                    'valid': False,
+                    'error': "Invalid PDF file format"
+                }
+            
+            # Check if PDF has EOF marker
+            if b'%%EOF' not in file_bytes[-1024:]:
+                return {
+                    'valid': False,
+                    'error': "Corrupted PDF file (missing EOF)"
+                }
+            
+            return {'valid': True}
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': f"PDF validation failed: {str(e)}"
+            }
     
-    def _extract_file_metadata(self, uploaded_file) -> Dict[str, Any]:
+    def _extract_basic_metadata(self, uploaded_file) -> Dict[str, Any]:
         """Extract comprehensive file metadata"""
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        file_size_mb = uploaded_file.size / (1024 * 1024)
+        
+        metadata = {
+            "filename": uploaded_file.name,
+            "file_extension": file_extension,
+            "file_size_bytes": uploaded_file.size,
+            "file_size_mb": file_size_mb,
+            "upload_timestamp": datetime.now().isoformat(),
+            "estimated_pages": self._estimate_pages_advanced(uploaded_file.size, file_extension),
+            "processing_complexity": self._estimate_processing_complexity(file_extension, file_size_mb)
+        }
+        
+        # Add file-specific metadata
+        if file_extension in ['jpg', 'jpeg', 'png']:
+            metadata.update(self._extract_image_metadata(uploaded_file.getvalue()))
+        elif file_extension == 'pdf':
+            metadata.update(self._extract_pdf_metadata(uploaded_file.getvalue()))
+        
+        return metadata
+    
+    def _extract_image_metadata(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Extract image-specific metadata"""
+        try:
+            image = Image.open(io.BytesIO(file_bytes))
+            return {
+                "image_width": image.width,
+                "image_height": image.height,
+                "image_mode": image.mode,
+                "image_format": image.format,
+                "estimated_text_density": self._estimate_text_density(image)
+            }
+        except Exception:
+            return {"image_metadata_error": "Could not extract image metadata"}
+    
+    def _extract_pdf_metadata(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Extract PDF-specific metadata"""
+        try:
+            # Basic PDF analysis
+            pdf_text = file_bytes.decode('latin-1', errors='ignore')
+            
+            # Count pages (rough estimate)
+            page_count = pdf_text.count('/Type /Page')
+            if page_count == 0:
+                page_count = pdf_text.count('%%Page:')
+            
+            return {
+                "pdf_estimated_pages": max(1, page_count),
+                "pdf_has_text": '/Font' in pdf_text or 'Tj' in pdf_text,
+                "pdf_has_images": '/Image' in pdf_text or '/XObject' in pdf_text
+            }
+        except Exception:
+            return {"pdf_metadata_error": "Could not extract PDF metadata"}
+    
+    def _estimate_text_density(self, image: Image.Image) -> str:
+        """Estimate text density in image"""
+        # Simple heuristic based on image characteristics
+        width, height = image.size
+        total_pixels = width * height
+        
+        if total_pixels < 100_000:  # Small image
+            return "low"
+        elif image.mode == 'L' or (image.mode == 'RGB' and self._is_mostly_text_colors(image)):
+            return "high"
+        else:
+            return "medium"
+    
+    def _is_mostly_text_colors(self, image: Image.Image) -> bool:
+        """Check if image has typical text colors (black/white dominant)"""
+        try:
+            # Convert to grayscale for analysis
+            grayscale = image.convert('L')
+            # Sample pixels
+            pixels = list(grayscale.getdata())
+            
+            # Count black/white-ish pixels
+            text_like_pixels = sum(1 for p in pixels[::100] if p < 50 or p > 200)
+            sample_size = len(pixels[::100])
+            
+            return (text_like_pixels / sample_size) > 0.6 if sample_size > 0 else False
+        except Exception:
+            return False
+    
+    def _estimate_pages_advanced(self, file_size: int, extension: str) -> int:
+        """Advanced page estimation with better accuracy"""
+        if extension == 'pdf':
+            # Better PDF page estimation
+            if file_size < 50_000:  # < 50KB
+                return 1
+            elif file_size < 500_000:  # < 500KB
+                return max(1, file_size // 80_000)
+            else:
+                return max(1, file_size // 120_000)
+        elif extension in ['jpg', 'jpeg', 'png']:
+            return 1
+        elif extension == 'txt':
+            # Text files: ~3KB per page
+            return max(1, file_size // 3_000)
+        elif extension == 'docx':
+            # Word docs: ~50KB per page
+            return max(1, file_size // 50_000)
+        else:
+            return 1
+    
+    def _estimate_processing_complexity(self, extension: str, file_size_mb: float) -> str:
+        """Estimate processing complexity"""
+        if extension == 'txt':
+            return "low"
+        elif extension in ['jpg', 'jpeg', 'png']:
+            if file_size_mb > 5:
+                return "high"
+            elif file_size_mb > 2:
+                return "medium"
+            else:
+                return "low"
+        elif extension == 'pdf':
+            if file_size_mb > 10:
+                return "high"
+            elif file_size_mb > 3:
+                return "medium"
+            else:
+                return "low"
+        else:
+            return "medium"
+    
+    def _prepare_for_processing(self, uploaded_file, metadata: Dict) -> Dict[str, Any]:
+        """Prepare file data for Azure processing with optimization"""
         try:
             file_bytes = uploaded_file.getvalue()
+            extension = metadata["file_extension"]
             
-            metadata = {
-                "filename": uploaded_file.name,
-                "size_bytes": uploaded_file.size,
-                "size_mb": round(uploaded_file.size / (1024 * 1024), 2),
-                "file_type": uploaded_file.type,
-                "extension": uploaded_file.name.split('.')[-1].lower(),
-                "upload_timestamp": datetime.now().isoformat(),
-                "file_hash": self._calculate_file_hash(file_bytes)
+            # Enhanced content type mapping
+            content_type_map = {
+                'pdf': 'application/pdf',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg', 
+                'png': 'image/png',
+                'txt': 'text/plain',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             }
             
-            # Add image-specific metadata
-            if metadata["extension"] in ['jpg', 'jpeg', 'png']:
-                try:
-                    image = Image.open(io.BytesIO(file_bytes))
-                    metadata.update({
-                        "image_dimensions": f"{image.width}x{image.height}",
-                        "image_mode": image.mode,
-                        "image_format": image.format,
-                        "estimated_dpi": getattr(image, 'info', {}).get('dpi', 'Unknown')
-                    })
-                except Exception:
-                    pass
-            
-            return metadata
-            
-        except Exception as e:
-            logger.error(f"Metadata extraction error: {e}")
-            return {"error": f"Could not extract metadata: {str(e)}"}
-    
-    def _prepare_file_for_processing(self, uploaded_file, metadata: Dict) -> Dict[str, Any]:
-        """
-        Prepare file data for Azure processing
-        
-        Args:
-            uploaded_file: Streamlit UploadedFile object
-            metadata: File metadata dictionary
-            
-        Returns:
-            Dict containing processed file data ready for Azure APIs
-        """
-        try:
-            file_bytes = uploaded_file.getvalue()
-            
-            # Determine content type for Azure API
-            extension = metadata["extension"]
-            
-            if extension == 'pdf':
-                content_type = 'application/pdf'
-            elif extension in ['jpg', 'jpeg']:
-                content_type = 'image/jpeg'
-            elif extension == 'png':
-                content_type = 'image/png'
-            elif extension == 'txt':
-                content_type = 'text/plain'
-            elif extension == 'docx':
-                content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            else:
-                content_type = 'application/octet-stream'
+            content_type = content_type_map.get(extension, 'application/octet-stream')
             
             processed_data = {
                 "file_bytes": file_bytes,
                 "content_type": content_type,
-                "azure_compatible": True,
-                "preprocessing_info": {
-                    "requires_ocr": extension in ['pdf', 'jpg', 'jpeg', 'png'],
-                    "text_extractable": extension in ['txt', 'docx'],
-                    "azure_document_intelligence_compatible": extension in ['pdf', 'jpg', 'jpeg', 'png'],
-                    "direct_text_available": extension in ['txt']
+                "processing_info": {
+                    "needs_ocr": extension in ['pdf', 'jpg', 'jpeg', 'png'],
+                    "is_text_file": extension == 'txt',
+                    "azure_compatible": extension in ['pdf', 'jpg', 'jpeg', 'png'],
+                    "direct_text_available": extension == 'txt',
+                    "estimated_processing_time": self._estimate_processing_time(metadata),
+                    "optimization_applied": False
                 }
             }
             
-            # For text files, extract content directly
+            # Handle text files directly
             if extension == 'txt':
-                try:
-                    text_content = file_bytes.decode('utf-8')
-                    processed_data["direct_text"] = text_content
-                    processed_data["text_length"] = len(text_content)
-                except UnicodeDecodeError:
-                    # Try different encodings
-                    for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
-                        try:
-                            text_content = file_bytes.decode(encoding)
-                            processed_data["direct_text"] = text_content
-                            processed_data["text_length"] = len(text_content)
-                            processed_data["encoding_used"] = encoding
-                            break
-                        except UnicodeDecodeError:
-                            continue
-                    else:
-                        processed_data["direct_text"] = None
-                        processed_data["text_extraction_error"] = "Could not decode text with common encodings"
+                text_result = self._extract_text_from_txt(file_bytes)
+                processed_data.update(text_result)
+            
+            # Optimize large images for processing
+            elif extension in ['jpg', 'jpeg', 'png'] and metadata.get('file_size_mb', 0) > 3:
+                optimized_result = self._optimize_image_for_processing(file_bytes)
+                if optimized_result.get('success'):
+                    processed_data["file_bytes"] = optimized_result["optimized_bytes"]
+                    processed_data["processing_info"]["optimization_applied"] = True
+                    processed_data["processing_info"]["original_size_mb"] = metadata['file_size_mb']
+                    processed_data["processing_info"]["optimized_size_mb"] = len(optimized_result["optimized_bytes"]) / (1024 * 1024)
             
             return processed_data
             
@@ -382,41 +359,119 @@ class FileHandler:
             logger.error(f"File preparation error: {e}")
             return {"error": f"Failed to prepare file: {str(e)}"}
     
-    def _calculate_file_hash(self, file_bytes: bytes) -> str:
-        """Calculate SHA-256 hash for file content"""
-        return hashlib.sha256(file_bytes).hexdigest()
-    
-    def _get_cached_result(self, file_hash: str) -> Optional[Dict]:
-        """Retrieve cached processing result if available"""
-        if not self.cache_enabled:
-            return None
+    def _extract_text_from_txt(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Extract text from TXT files with encoding detection"""
+        encodings_to_try = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1']
         
+        for encoding in encodings_to_try:
+            try:
+                text_content = file_bytes.decode(encoding)
+                return {
+                    "direct_text": text_content,
+                    "text_length": len(text_content),
+                    "encoding_used": encoding,
+                    "word_count": len(text_content.split()),
+                    "line_count": text_content.count('\n') + 1
+                }
+            except UnicodeDecodeError:
+                continue
+        
+        return {
+            "direct_text": None,
+            "text_error": "Could not decode text file with any supported encoding"
+        }
+    
+    def _optimize_image_for_processing(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Optimize large images for better processing"""
         try:
-            cache_file = self.cache_dir / f"{file_hash}.json"
-            if cache_file.exists():
-                # Check cache age
-                cache_age_hours = (datetime.now().timestamp() - cache_file.stat().st_mtime) / 3600
-                if cache_age_hours < Config.CACHE_TTL_HOURS:
-                    with open(cache_file, 'r', encoding='utf-8') as f:
-                        cached_data = json.load(f)
-                    logger.info(f"📁 Cache hit for file hash: {file_hash[:8]}...")
+            image = Image.open(io.BytesIO(file_bytes))
+            
+            # Calculate optimal size (target: ~2MP for OCR)
+            width, height = image.size
+            total_pixels = width * height
+            
+            if total_pixels > 2_000_000:  # 2 megapixels
+                # Calculate scale factor
+                scale_factor = (2_000_000 / total_pixels) ** 0.5
+                new_width = int(width * scale_factor)
+                new_height = int(height * scale_factor)
+                
+                # Resize image
+                resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Convert to bytes
+                output_buffer = io.BytesIO()
+                
+                # Optimize format and quality
+                if image.format == 'PNG':
+                    resized_image.save(output_buffer, format='PNG', optimize=True)
+                else:
+                    # Convert to JPEG for better compression
+                    if resized_image.mode in ('RGBA', 'LA', 'P'):
+                        resized_image = resized_image.convert('RGB')
+                    resized_image.save(output_buffer, format='JPEG', quality=85, optimize=True)
+                
+                optimized_bytes = output_buffer.getvalue()
+                
+                return {
+                    "success": True,
+                    "optimized_bytes": optimized_bytes,
+                    "original_size": len(file_bytes),
+                    "optimized_size": len(optimized_bytes),
+                    "compression_ratio": len(optimized_bytes) / len(file_bytes),
+                    "new_dimensions": (new_width, new_height),
+                    "original_dimensions": (width, height)
+                }
+            
+            return {"success": False, "reason": "No optimization needed"}
+            
+        except Exception as e:
+            logger.error(f"Image optimization error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _estimate_processing_time(self, metadata: Dict) -> str:
+        """Estimate processing time based on file characteristics"""
+        extension = metadata.get('file_extension', '')
+        file_size_mb = metadata.get('file_size_mb', 0)
+        complexity = metadata.get('processing_complexity', 'medium')
+        
+        if extension == 'txt':
+            return "< 5 seconds"
+        elif complexity == 'low':
+            return "5-15 seconds"
+        elif complexity == 'medium':
+            return "15-45 seconds"
+        else:
+            return "45-120 seconds"
+    
+    def _calculate_file_hash(self, file_bytes: bytes) -> str:
+        """Calculate SHA-256 hash for better caching"""
+        return hashlib.sha256(file_bytes).hexdigest()[:16]  # Use first 16 chars
+    
+    def _check_cache_simple(self, file_hash: str) -> Optional[Dict]:
+        """Check if cached result exists with expiry"""
+        cache_file = self.cache_dir / f"{file_hash}.json"
+        
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cached_data = json.load(f)
+                
+                # Check if cache is expired (24 hours)
+                cache_time = datetime.fromisoformat(cached_data.get('timestamp', ''))
+                if (datetime.now() - cache_time).total_seconds() < 86400:  # 24 hours
                     return cached_data
                 else:
                     # Remove expired cache
                     cache_file.unlink()
-                    logger.info(f"🗑️ Removed expired cache for: {file_hash[:8]}...")
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Cache retrieval error: {e}")
-            return None
+                    
+            except Exception as e:
+                logger.warning(f"Cache read error: {e}")
+        
+        return None
     
     def cache_result(self, file_hash: str, result_data: Dict) -> bool:
-        """Cache processing result for future use"""
-        if not self.cache_enabled:
-            return False
-        
+        """Cache processing result with metadata"""
         try:
             cache_file = self.cache_dir / f"{file_hash}.json"
             
@@ -425,121 +480,67 @@ class FileHandler:
                 **result_data,
                 "cache_metadata": {
                     "cached_at": datetime.now().isoformat(),
-                    "file_hash": file_hash,
-                    "cache_version": "1.0"
+                    "cache_version": "1.0",
+                    "file_hash": file_hash
                 }
             }
             
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
             
-            logger.info(f"💾 Cached result for file hash: {file_hash[:8]}...")
+            logger.info(f"Cached result for file hash: {file_hash}")
             return True
             
         except Exception as e:
-            logger.error(f"Cache save error: {e}")
+            logger.error(f"Cache write error: {e}")
             return False
     
-    def _display_file_info(self, metadata: Dict, cached: bool = False) -> None:
-        """Display file information in Streamlit interface"""
-        try:
-            st.success(f"{'📁 File loaded from cache!' if cached else '📁 File uploaded successfully!'}")
-            
-            # Create info columns
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("📄 File Name", metadata.get("filename", "Unknown"))
-                st.metric("📏 File Size", f"{metadata.get('size_mb', 0)} MB")
-            
-            with col2:
-                st.metric("🔤 File Type", metadata.get("extension", "Unknown").upper())
-                if metadata.get("image_dimensions"):
-                    st.metric("📐 Dimensions", metadata["image_dimensions"])
-            
-            with col3:
-                upload_time = metadata.get("upload_timestamp", "")
-                if upload_time:
-                    # Format timestamp for display
-                    try:
-                        dt = datetime.fromisoformat(upload_time)
-                        formatted_time = dt.strftime("%H:%M:%S")
-                        st.metric("⏰ Uploaded", formatted_time)
-                    except:
-                        st.metric("⏰ Uploaded", "Just now")
-                
-                if cached:
-                    st.metric("⚡ Source", "Cache")
-            
-            # Show detailed info in expander
-            with st.expander("🔍 Detailed File Information", expanded=False):
-                for key, value in metadata.items():
-                    if key not in ["file_hash"]:  # Hide sensitive info
-                        st.write(f"**{key.replace('_', ' ').title()}:** {value}")
-                        
-        except Exception as e:
-            logger.error(f"Display error: {e}")
-            st.warning("Could not display all file information")
+    def get_processing_recommendations(self, file_metadata: Dict) -> Dict[str, str]:
+        """Get intelligent processing recommendations"""
+        recommendations = {}
+        
+        file_size_mb = file_metadata.get('file_size_mb', 0)
+        file_extension = file_metadata.get('file_extension', '')
+        complexity = file_metadata.get('processing_complexity', 'medium')
+        
+        if file_size_mb > 10:
+            recommendations['size'] = "⚠️ Large file - processing may take 2-3 minutes"
+        elif file_size_mb > 5:
+            recommendations['size'] = "📊 Medium file - processing may take 1-2 minutes"
+        
+        if file_extension in ['jpg', 'jpeg', 'png']:
+            recommendations['image'] = "📸 Ensure image has clear, readable text for best results"
+            if file_metadata.get('estimated_text_density') == 'low':
+                recommendations['text_density'] = "⚠️ Low text density detected - results may be limited"
+        
+        if file_extension == 'pdf':
+            if file_metadata.get('pdf_has_text'):
+                recommendations['pdf'] = "✅ Text-based PDF detected - excellent for processing"
+            else:
+                recommendations['pdf'] = "📄 Scanned PDF detected - OCR will be used"
+        
+        if complexity == 'high':
+            recommendations['complexity'] = "🔧 Complex file - consider breaking into smaller parts"
+        
+        return recommendations
     
-    def get_processing_status(self, file_data: Dict) -> Dict[str, Any]:
-        """Determine what processing steps are needed for the file"""
-        try:
-            preprocessing_info = file_data.get("preprocessing_info", {})
-            
-            status = {
-                "needs_ocr": preprocessing_info.get("requires_ocr", False),
-                "has_direct_text": preprocessing_info.get("text_extractable", False),
-                "azure_compatible": file_data.get("azure_compatible", False),
-                "recommended_processing": []
-            }
-            
-            # Determine processing recommendations
-            if preprocessing_info.get("azure_document_intelligence_compatible"):
-                status["recommended_processing"].append("Azure Document Intelligence (OCR)")
-            
-            if preprocessing_info.get("direct_text_available"):
-                status["recommended_processing"].append("Direct text extraction")
-            
-            if not status["recommended_processing"]:
-                status["recommended_processing"].append("Manual text input required")
-            
-            return status
-            
-        except Exception as e:
-            logger.error(f"Status check error: {e}")
-            return {"error": f"Could not determine processing status: {str(e)}"}
-    
-    def cleanup_cache(self, max_age_hours: int = None) -> Dict[str, int]:
+    def cleanup_old_cache(self, days_old: int = 7) -> int:
         """Clean up old cache files"""
-        if not self.cache_enabled or not self.cache_dir.exists():
-            return {"removed": 0, "kept": 0, "errors": 0}
-        
-        max_age = max_age_hours or Config.CACHE_TTL_HOURS
-        current_time = datetime.now().timestamp()
-        
-        removed = 0
-        kept = 0
-        errors = 0
-        
         try:
-            for cache_file in self.cache_dir.glob("*.json"):
-                try:
-                    file_age_hours = (current_time - cache_file.stat().st_mtime) / 3600
-                    if file_age_hours > max_age:
-                        cache_file.unlink()
-                        removed += 1
-                    else:
-                        kept += 1
-                except Exception:
-                    errors += 1
+            cleaned_count = 0
+            cutoff_time = datetime.now().timestamp() - (days_old * 86400)
             
-            logger.info(f"🧹 Cache cleanup: {removed} removed, {kept} kept, {errors} errors")
+            for cache_file in self.cache_dir.glob("*.json"):
+                if cache_file.stat().st_mtime < cutoff_time:
+                    cache_file.unlink()
+                    cleaned_count += 1
+            
+            logger.info(f"Cleaned {cleaned_count} old cache files")
+            return cleaned_count
             
         except Exception as e:
             logger.error(f"Cache cleanup error: {e}")
-            errors += 1
-        
-        return {"removed": removed, "kept": kept, "errors": errors}
+            return 0
 
 # Create global instance
 file_handler = FileHandler()

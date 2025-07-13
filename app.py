@@ -1,6 +1,9 @@
 import streamlit as st
 import logging
 import time
+import io
+import re
+import random
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import json
@@ -18,269 +21,470 @@ logger = logging.getLogger(__name__)
 
 class FlashcardApp:
     """
-    Main Streamlit application class for AI-Powered Flashcard Generator
-    
-    This class orchestrates the entire workflow:
-    1. File upload and validation
-    2. Document processing (OCR/text extraction)
-    3. Text analysis and enhancement
-    4. AI-powered flashcard generation
-    5. Interactive flashcard review
+    Streamlit application class 
     """
     
     def __init__(self):
         """Initialize the application"""
         self.setup_page_config()
-        self.setup_session_state()
-        self.flashcard_generator = GeminiFlashcardGenerator()
+        self.gemini_generator = GeminiFlashcardGenerator()
         
-        # Initialize application configuration
-        if not hasattr(st.session_state, 'app_initialized'):
-            self.initialize_app()
-    
-    def setup_page_config(self):
-        """Configure Streamlit page settings"""
-        st.set_page_config(
-            page_title=Config.PAGE_TITLE,
-            page_icon=Config.PAGE_ICON,
-            layout=Config.LAYOUT,
-            initial_sidebar_state=Config.INITIAL_SIDEBAR_STATE,
-            menu_items={
-                'Get Help': 'https://github.com/your-repo/flashcard-generator',
-                'Report a bug': 'https://github.com/your-repo/flashcard-generator/issues',
-                'About': "AI-Powered Flashcard Generator - Transform your study materials into interactive flashcards!"
+        # Initialize session state
+        if 'current_stage' not in st.session_state:
+            st.session_state.current_stage = 1
+        if 'processing_results' not in st.session_state:
+            st.session_state.processing_results = {}
+        if 'flashcards' not in st.session_state:
+            st.session_state.flashcards = []
+        if 'study_settings' not in st.session_state:
+            st.session_state.study_settings = {
+                'num_flashcards': 10,
+                'difficulty': 'Mixed (Recommended)',
+                'focus_mode': False
             }
+
+    def setup_page_config(self):
+        """Configure Streamlit page settings with enhanced CSS and fixed UI issues"""
+        st.set_page_config(
+            page_title="🧠 Scribbly - AI Study Helper",
+            page_icon="🧠",
+            layout="wide",
+            initial_sidebar_state="expanded"
         )
         
-        # Custom CSS for better styling
+        # FIXED CSS with improved tab visibility and summary styling
         st.markdown("""
         <style>
         .main > div {
-            padding-top: 2rem;
-        }
-        .stAlert > div {
             padding-top: 1rem;
         }
+        
+        /* FIXED: Enhanced action button styling */
+        .action-button-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 2rem;
+            border-radius: 15px;
+            margin: 2rem 0;
+            text-align: center;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+        .action-button-container h3 {
+            color: white !important;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        .action-button-container p {
+            color: #e8eaff !important;
+            margin-bottom: 1.5rem;
+            font-size: 1.1em;
+        }
+        
+        /* Generation options styling */
+        .generation-options {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 1.5rem 0;
+            border-left: 5px solid #667eea;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+        .generation-options h3 {
+            color: #2c3e50 !important;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        .generation-options p {
+            color: #495057 !important;
+            margin: 0;
+            font-size: 1.05em;
+            line-height: 1.6;
+        }
+        
+        /* NEW: Flashcard styling for viewing modes */
         .flashcard {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 2rem;
-            border-radius: 15px;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin: 0.5rem 0;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        .flashcard-back {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin: 0.5rem 0;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        .key-concept-tag {
+            display: inline-block;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            margin: 0.2rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        
+        .concept-category {
+            background: #f8f9fa;
+            padding: 0.8rem;
+            border-left: 4px solid #667eea;
             margin: 1rem 0;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-radius: 5px;
+        }
+        }
+        
+        .flashcard {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin: 1rem 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.2s;
+        }
+        .flashcard:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
         }
         .flashcard-back {
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
-            padding: 2rem;
-            border-radius: 15px;
+            padding: 1.5rem;
+            border-radius: 12px;
             margin: 1rem 0;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.2s;
         }
+        .flashcard-back:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+        }
+        
+        /* FIXED: Improved summary box styles with better contrast */
+        .summary-box {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            color: #2c3e50 !important;
+            padding: 2rem;
+            border-radius: 12px;
+            border-left: 5px solid #3498db;
+            margin: 1.5rem 0;
+            font-size: 1.1em;
+            line-height: 1.7;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.1);
+        }
+        .summary-box h3 {
+            color: #1e3a8a !important;
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+            font-size: 1.3em;
+        }
+        .summary-box p {
+            color: #374151 !important;
+            margin: 0;
+            font-weight: 400;
+            text-align: justify;
+        }
+        
+        /* FIXED: Educational summary style with better readability */
+        .educational-summary {
+            background: linear-gradient(135deg, #ffffff 0%, #fef7ff 100%);
+            color: #2d1b69 !important;
+            padding: 2rem;
+            border-radius: 12px;
+            border-left: 5px solid #8b5cf6;
+            margin: 1.5rem 0;
+            font-size: 1.1em;
+            line-height: 1.7;
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.1);
+        }
+        .educational-summary h3 {
+            color: #5b21b6 !important;
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+            font-size: 1.3em;
+        }
+        .educational-summary p {
+            color: #4c1d95 !important;
+            margin: 0;
+            font-weight: 400;
+            text-align: justify;
+        }
+        
+        /* FIXED: Azure extractive summary style with dark text */
+        .extractive-summary {
+            background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+            color: #14532d !important;
+            padding: 2rem;
+            border-radius: 12px;
+            border-left: 5px solid #10b981;
+            margin: 1.5rem 0;
+            font-size: 1.1em;
+            line-height: 1.7;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.1);
+        }
+        .extractive-summary h3 {
+            color: #065f46 !important;
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+            font-size: 1.3em;
+        }
+        .extractive-summary p {
+            color: #166534 !important;
+            margin: 0;
+            font-weight: 400;
+            text-align: justify;
+        }
+        
+        /* FIXED: Azure abstractive summary style with better contrast */
+        .abstractive-summary {
+            background: linear-gradient(135deg, #ffffff 0%, #fffbeb 100%);
+            color: #92400e !important;
+            padding: 2rem;
+            border-radius: 12px;
+            border-left: 5px solid #f59e0b;
+            margin: 1.5rem 0;
+            font-size: 1.1em;
+            line-height: 1.7;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.1);
+        }
+        .abstractive-summary h3 {
+            color: #78350f !important;
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+            font-size: 1.3em;
+        }
+        .abstractive-summary p {
+            color: #a16207 !important;
+            margin: 0;
+            font-weight: 400;
+            text-align: justify;
+        }
+        
         .metric-card {
             background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 3px solid #667eea;
+        }
+        .error-box {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828 !important;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        
+        /* FIXED: Better key concept tags */
+        .key-concept-tag {
+            background: #4f46e5 !important;
+            color: white !important;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9em;
+            display: inline-block;
+            margin: 0.3rem 0.2rem;
+            font-weight: 600;
+            box-shadow: 0 2px 6px rgba(79, 70, 229, 0.3);
+            transition: transform 0.2s;
+        }
+        .key-concept-tag:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(79, 70, 229, 0.4);
+        }
+        
+        /* FIXED: Educational concept categories */
+        .concept-category {
+            margin: 1.5rem 0;
             padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            border-left: 4px solid #667eea;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-left: 4px solid #6366f1;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
-        .status-success {
-            color: #28a745;
-            font-weight: bold;
+        .concept-category h4 {
+            color: #1e293b !important;
+            margin-bottom: 1rem;
+            font-size: 1.2em;
+            font-weight: 600;
         }
-        .status-warning {
-            color: #ffc107;
-            font-weight: bold;
+        
+        /* FIXED: Progress bar styling */
+        .stProgress > div > div > div > div {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         }
-        .status-error {
-            color: #dc3545;
-            font-weight: bold;
+        
+        /* FIXED: Enhanced tab styling with better visibility */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 32px;
+            padding: 0 16px;
+            background: rgba(102, 126, 234, 0.05);
+            border-radius: 12px;
+            margin: 16px 0;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 56px;
+            white-space: pre-wrap;
+            background-color: transparent;
+            border-radius: 8px 8px 0 0;
+            color: #374151 !important;
+            font-weight: 600 !important;
+            font-size: 1.05em !important;
+            padding: 12px 24px !important;
+            border: none !important;
+            transition: all 0.2s ease;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: rgba(102, 126, 234, 0.1);
+            color: #4f46e5 !important;
+        }
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        /* FIXED: Ensure all text in containers is readable */
+        .stMarkdown {
+            color: inherit;
+        }
+        
+        /* FIXED: File info styling to prevent duplication */
+        .file-info-container {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            border-left: 4px solid #10b981;
         }
         </style>
         """, unsafe_allow_html=True)
-    
-    def setup_session_state(self):
-        """Initialize session state variables"""
-        default_states = {
-            'uploaded_file_data': None,
-            'processing_results': None,
-            'flashcards': None,
-            'current_card_index': 0,
-            'show_answer': False,
-            'processing_stage': 'upload',
-            'processing_progress': 0,
-            'error_messages': [],
-            'app_initialized': False,
-            'cache_hits': 0,
-            'total_processing_time': 0
-        }
-        
-        for key, value in default_states.items():
-            if key not in st.session_state:
-                st.session_state[key] = value
-    
-    def initialize_app(self):
-        """Initialize the application configuration"""
-        try:
-            with st.spinner("🚀 Initializing AI-Powered Flashcard Generator..."):
-                # Initialize configuration
-                init_success, init_message = Config.initialize_app()
-                
-                if init_success:
-                    st.success("✅ Application initialized successfully!")
-                    st.session_state.app_initialized = True
-                    logger.info("Application initialized successfully")
-                else:
-                    st.error(f"❌ Application initialization failed: {init_message}")
-                    st.stop()
-                    
-        except Exception as e:
-            st.error(f"❌ Critical initialization error: {str(e)}")
-            st.stop()
-    
+
     def run(self):
-        """Main application entry point"""
-        try:
-            # Header
-            self.render_header()
-            
-            # Sidebar
-            self.render_sidebar()
-            
-            # Main content area
-            main_col1, main_col2 = st.columns([2, 1])
-            
-            with main_col1:
-                self.render_main_content()
-            
-            with main_col2:
-                self.render_status_panel()
-            
-            # Footer
-            self.render_footer()
-            
-        except Exception as e:
-            st.error(f"❌ Application error: {str(e)}")
-            logger.error(f"Application error: {e}")
-    
-    def render_header(self):
-        """Render application header"""
-        st.title("🧠 AI-Powered Flashcard Generator")
-        st.markdown("""
-        Transform your study materials into interactive flashcards using advanced AI! 
-        Upload documents, images, or text files and let our AI create personalized flashcards for optimal learning.
-        """)
+        """Main application runner with enhanced workflow"""
+        # Sidebar with enhanced settings
+        self.render_sidebar()
+        
+        # Main header
+        st.markdown("# 🧠 Scribbly - AI Study Helper")
+        st.markdown("Transform your notes into interactive flashcards with AI")
         
         # Progress indicator
-        if st.session_state.processing_stage != 'upload':
-            progress_stages = ['upload', 'processing', 'analysis', 'generation', 'complete']
-            current_stage_index = progress_stages.index(st.session_state.processing_stage)
-            progress_value = (current_stage_index + 1) / len(progress_stages)
-            
-            st.progress(progress_value)
-            st.markdown(f"**Current Stage:** {st.session_state.processing_stage.title()}")
-    
+        self.render_progress_indicator()
+        
+        # Main content area based on current stage
+        if st.session_state.current_stage == 1:
+            self.render_upload_stage()
+        elif st.session_state.current_stage == 2:
+            self.render_generation_options_stage()
+        elif st.session_state.current_stage == 3:
+            self.render_processing_stage()
+        elif st.session_state.current_stage == 4:
+            self.render_study_mode()
+        else:
+            st.error("Invalid application stage")
+
     def render_sidebar(self):
-        """Render sidebar with configuration and status"""
+        """Enhanced sidebar with Azure service status and study settings"""
         with st.sidebar:
-            st.header("⚙️ Configuration")
+            st.markdown("## ⚙️ Study Settings")
             
             # Service status
-            self.render_service_status()
+            st.markdown("### 🔧 Azure Services")
+            services = Config.get_available_services()
             
-            st.markdown("---")
+            for service, available in services.items():
+                emoji = "✅" if available else "❌"
+                service_name = service.replace('_', ' ').title()
+                st.markdown(f"{emoji} {service_name}")
             
-            # Processing options
-            st.subheader("🎛️ Processing Options")
+            st.divider()
             
-            # Flashcard type selection
-            st.multiselect(
-                "Flashcard Types",
-                Config.FLASHCARD_TYPES,
-                default=["definition", "conceptual"],
-                help="Select the types of flashcards to generate",
-                key="selected_flashcard_types"
-            )
+            # Study settings
+            st.markdown("### 📚 Study Configuration")
             
-            # Difficulty distribution
-            st.selectbox(
-                "Difficulty Level",
-                ["Auto (Recommended)", "Easy Focus", "Medium Focus", "Hard Focus"],
-                help="Choose the difficulty distribution for flashcards",
-                key="difficulty_preference"
-            )
-            
-            # Number of flashcards
-            st.slider(
+            st.session_state.study_settings['num_flashcards'] = st.slider(
                 "Number of Flashcards",
-                min_value=3,
-                max_value=Config.MAX_TOTAL_CARDS,
-                value=10,
-                help=f"Choose how many flashcards to generate (max: {Config.MAX_TOTAL_CARDS})",
-                key="flashcard_count"
+                min_value=5,
+                max_value=20,
+                value=st.session_state.study_settings['num_flashcards'],
+                step=1
             )
             
-            st.markdown("---")
+            st.session_state.study_settings['difficulty'] = st.selectbox(
+                "Difficulty Focus",
+                ["Mixed (Recommended)", "Basic Concepts", "Advanced Topics", "Application-Based"],
+                index=0 if st.session_state.study_settings['difficulty'] == "Mixed (Recommended)" else 0
+            )
             
-            # Processing statistics
-            if st.session_state.processing_results:
-                self.render_processing_stats()
+            st.session_state.study_settings['focus_mode'] = st.checkbox(
+                "🎯 Study Mode",
+                value=st.session_state.study_settings['focus_mode'],
+                help="Removes distractions during study sessions"
+            )
             
-            st.markdown("---")
+            st.divider()
             
-            # Quick actions
-            st.subheader("🚀 Quick Actions")
+            # Reset and help
+            if st.button("🔄 Start Over", use_container_width=True):
+                self.reset_session()
             
-            if st.button("🗑️ Clear All Data"):
-                self.reset_application()
-                st.rerun()
-            
-            if st.button("📊 View Config Summary"):
-                self.show_config_summary()
-            
-            if st.button("💾 Export Results"):
-                self.export_results()
-    
-    def render_service_status(self):
-        """Render service availability status"""
-        st.subheader("🔌 Service Status")
+            with st.expander("ℹ️ How it works"):
+                st.markdown("""
+                **Step 1:** Upload your study material (PDF, images, text)
+                
+                **Step 2:** Choose what to generate (flashcards, summary, or both)
+                
+                **Step 3:** AI processes and analyzes your content
+                
+                **Step 4:** Study with interactive flashcard interface
+                
+                **Powered by:** Azure Document Intelligence, Azure Language Services, Google Gemini AI
+                """)
+
+    def reset_session(self):
+        """Reset all session state variables"""
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
+    def render_progress_indicator(self):
+        """Enhanced progress indicator with new stage"""
+        progress_steps = [
+            "📁 Upload Material",
+            "🎯 Choose Actions",
+            "🔍 AI Processing", 
+            "📚 Study Mode"
+        ]
         
-        services = Config.get_available_services()
+        current_step = st.session_state.current_stage
+        progress_percentage = (current_step / len(progress_steps))
         
-        for service, available in services.items():
-            service_name = service.replace('_', ' ').title()
-            if available:
-                st.success(f"✅ {service_name}")
-            else:
-                st.error(f"❌ {service_name}")
+        st.progress(progress_percentage)
         
-        # Overall status
-        available_count = sum(services.values())
-        total_count = len(services)
-        
-        if available_count == total_count:
-            st.success("🎉 All services operational!")
-        elif available_count > 0:
-            st.warning(f"⚠️ {available_count}/{total_count} services available")
-        else:
-            st.error("❌ No services available")
-    
-    def render_main_content(self):
-        """Render main content area based on current stage"""
-        if st.session_state.processing_stage == 'upload':
-            self.render_upload_stage()
-        elif st.session_state.processing_stage == 'processing':
-            self.render_processing_stage()
-        elif st.session_state.processing_stage == 'analysis':
-            self.render_analysis_stage()
-        elif st.session_state.processing_stage == 'generation':
-            self.render_generation_stage()
-        elif st.session_state.processing_stage == 'complete':
-            self.render_flashcard_review_stage()
-    
+        # Step indicator
+        cols = st.columns(len(progress_steps))
+        for i, (col, step) in enumerate(zip(cols, progress_steps)):
+            with col:
+                if i + 1 == current_step:
+                    st.markdown(f"**{step}** ⭐")
+                elif i + 1 < current_step:
+                    st.markdown(f"~~{step}~~ ✅")
+                else:
+                    st.markdown(f"{step}")
+
     def render_upload_stage(self):
-        """Render file upload stage"""
-        st.header("📁 Step 1: Upload Your Study Material")
+        """FIXED: Enhanced file upload stage without duplicate file info"""
+        st.header("📁 Upload Your Study Material")
+        st.markdown("Upload notes, PDFs, images, or documents to create flashcards")
         
         # File upload interface
         uploaded_file_data = file_handler.create_upload_interface()
@@ -288,707 +492,1027 @@ class FlashcardApp:
         if uploaded_file_data and not uploaded_file_data.get('error'):
             st.session_state.uploaded_file_data = uploaded_file_data
             
-            # Show file information
             st.success("✅ File uploaded successfully!")
             
-            # Processing options
-            col1, col2 = st.columns(2)
+            # FIXED: Show file info only once in a styled container
+            metadata = uploaded_file_data.get('metadata', {})
             
-            with col1:
-                if st.button("🚀 Start Processing", type="primary", use_container_width=True):
-                    self.start_processing()
-            
-            with col2:
-                if st.button("🔄 Upload Different File", use_container_width=True):
-                    st.session_state.uploaded_file_data = None
-                    st.rerun()
-        
-        elif uploaded_file_data and uploaded_file_data.get('error'):
-            st.error(f"❌ {uploaded_file_data['error']}")
-    
-    def render_processing_stage(self):
-        """Render document processing stage"""
-        st.header("🔍 Step 2: Processing Document")
-        
-        if st.session_state.uploaded_file_data:
-            # Start processing
-            self.process_document()
-        else:
-            st.error("❌ No file data available. Please upload a file first.")
-            if st.button("← Go Back to Upload"):
-                st.session_state.processing_stage = 'upload'
-                st.rerun()
-    
-    def render_analysis_stage(self):
-        """Render text analysis stage"""
-        st.header("🧠 Step 3: Analyzing Content")
-        
-        if st.session_state.processing_results:
-            # Start analysis
-            self.analyze_content()
-        else:
-            st.error("❌ No processing results available.")
-            if st.button("← Go Back"):
-                st.session_state.processing_stage = 'upload'
-                st.rerun()
-    
-    def render_generation_stage(self):
-        """Render flashcard generation stage"""
-        st.header("🎴 Step 4: Generating Flashcards")
-        
-        if st.session_state.processing_results:
-            # Start flashcard generation
-            self.generate_flashcards()
-        else:
-            st.error("❌ No analysis results available.")
-            if st.button("← Go Back"):
-                st.session_state.processing_stage = 'upload'
-                st.rerun()
-    
-    def render_flashcard_review_stage(self):
-        """Render flashcard review and interaction stage"""
-        st.header("🎓 Step 5: Study Your Flashcards")
-        
-        if st.session_state.flashcards:
-            self.render_flashcard_interface()
-        else:
-            st.error("❌ No flashcards available.")
-            if st.button("← Generate Flashcards Again"):
-                st.session_state.processing_stage = 'generation'
-                st.rerun()
-    
-    def render_flashcard_interface(self):
-        """Render interactive flashcard interface"""
-        flashcards = st.session_state.flashcards
-        
-        if not flashcards or 'flashcards' not in flashcards:
-            st.error("❌ No flashcards found in results.")
-            return
-        
-        all_cards = []
-        for card_type, cards in flashcards['flashcards'].items():
-            if isinstance(cards, list):
-                for card in cards:
-                    card['type'] = card_type
-                    all_cards.append(card)
-        
-        if not all_cards:
-            st.warning("⚠️ No flashcards were generated. Try adjusting your settings and regenerating.")
-            return
-        
-        # Flashcard navigation
-        col1, col2, col3 = st.columns([1, 2, 1])
-        
-        with col1:
-            if st.button("← Previous", disabled=st.session_state.current_card_index == 0):
-                st.session_state.current_card_index = max(0, st.session_state.current_card_index - 1)
-                st.session_state.show_answer = False
-                st.rerun()
-        
-        with col2:
-            st.markdown(f"**Card {st.session_state.current_card_index + 1} of {len(all_cards)}**")
-            
-            # Card type indicator
-            current_card = all_cards[st.session_state.current_card_index]
-            card_type = current_card.get('type', 'unknown').title()
-            difficulty = current_card.get('difficulty', 'medium').title()
-            
-            st.markdown(f"*Type: {card_type} | Difficulty: {difficulty}*")
-        
-        with col3:
-            if st.button("Next →", disabled=st.session_state.current_card_index >= len(all_cards) - 1):
-                st.session_state.current_card_index = min(len(all_cards) - 1, st.session_state.current_card_index + 1)
-                st.session_state.show_answer = False
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # Current flashcard
-        current_card = all_cards[st.session_state.current_card_index]
-        
-        # Question side
-        st.markdown(f"""
-        <div class="flashcard">
-            <h3>❓ Question</h3>
-            <p style="font-size: 1.2em; line-height: 1.6;">{current_card.get('question', 'No question available')}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Show/Hide answer button
-        col1, col2, col3 = st.columns([1, 1, 1])
-        
-        with col2:
-            if not st.session_state.show_answer:
-                if st.button("👁️ Show Answer", type="primary", use_container_width=True):
-                    st.session_state.show_answer = True
-                    st.rerun()
-            else:
-                if st.button("🙈 Hide Answer", use_container_width=True):
-                    st.session_state.show_answer = False
-                    st.rerun()
-        
-        # Answer side (if shown)
-        if st.session_state.show_answer:
             st.markdown(f"""
-            <div class="flashcard-back">
-                <h3>✅ Answer</h3>
-                <p style="font-size: 1.2em; line-height: 1.6;">{current_card.get('answer', 'No answer available')}</p>
+            <div class="file-info-container">
+                <h4 style="color: #065f46; margin-bottom: 1rem;">📄 File Information</h4>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                    <div style="text-align: center;">
+                        <strong style="color: #374151;">📁 Size</strong><br>
+                        <span style="color: #6b7280; font-size: 1.1em;">{metadata.get('file_size_mb', 0):.1f} MB</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <strong style="color: #374151;">📄 Type</strong><br>
+                        <span style="color: #6b7280; font-size: 1.1em;">{metadata.get('file_extension', 'Unknown').upper()}</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <strong style="color: #374151;">📋 Pages</strong><br>
+                        <span style="color: #6b7280; font-size: 1.1em;">{metadata.get('estimated_pages', 1)}</span>
+                    </div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Confidence scoring
-            st.markdown("### 📊 How well did you know this?")
-            confidence_col1, confidence_col2, confidence_col3 = st.columns(3)
-            
-            with confidence_col1:
-                if st.button("😔 Need to Review", use_container_width=True):
-                    self.record_confidence("low")
-            
-            with confidence_col2:
-                if st.button("🤔 Somewhat Familiar", use_container_width=True):
-                    self.record_confidence("medium")
-            
-            with confidence_col3:
-                if st.button("😊 Knew It Well", use_container_width=True):
-                    self.record_confidence("high")
-        
-        st.markdown("---")
-        
-        # Study session controls
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Regenerate Flashcards"):
-                st.session_state.processing_stage = 'generation'
+            # ENHANCED: Clear next step button
+            if st.button("➡️ Choose What to Generate", type="primary", use_container_width=True):
+                st.session_state.current_stage = 2
                 st.rerun()
         
-        with col2:
-            if st.button("📊 Study Statistics"):
-                self.show_study_statistics(all_cards)
+        elif uploaded_file_data and uploaded_file_data.get('error'):
+            st.error(f"❌ {uploaded_file_data['error']}")
+
+    def render_generation_options_stage(self):
+        """NEW: Stage for choosing what to generate with explicit buttons"""
+        st.header("🎯 Choose What to Generate")
+        st.markdown("Select what you'd like to create from your uploaded material")
         
-        with col3:
-            if st.button("💾 Export Flashcards"):
-                self.export_flashcards(all_cards)
-    
-    def render_status_panel(self):
-        """Render status panel with progress and information"""
-        st.subheader("📊 Status Panel")
+        # Display uploaded file info
+        if 'uploaded_file_data' in st.session_state:
+            metadata = st.session_state.uploaded_file_data.get('metadata', {})
+            st.info(f"📄 Ready to process: **{metadata.get('filename', 'Your file')}** ({metadata.get('file_size_mb', 0):.1f} MB)")
         
-        # Current stage info
-        stage_info = {
-            'upload': {'icon': '📁', 'description': 'Ready to upload files'},
-            'processing': {'icon': '🔍', 'description': 'Extracting text content'},
-            'analysis': {'icon': '🧠', 'description': 'Analyzing content quality'},
-            'generation': {'icon': '🎴', 'description': 'Creating flashcards'},
-            'complete': {'icon': '🎓', 'description': 'Ready for studying'}
-        }
-        
-        current_stage = st.session_state.processing_stage
-        stage_data = stage_info.get(current_stage, {'icon': '❓', 'description': 'Unknown stage'})
-        
-        st.markdown(f"""
-        <div class="metric-card">
-            <h4>{stage_data['icon']} Current Stage</h4>
-            <p><strong>{current_stage.title()}</strong></p>
-            <p>{stage_data['description']}</p>
+        # ENHANCED: Generation options with beautiful UI
+        st.markdown("""
+        <div class="generation-options">
+            <h3>🤖 AI Generation Options</h3>
+            <p>Choose what you want to create from your study material. You can generate items individually or all at once.</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Processing metrics
-        if st.session_state.processing_results:
-            self.render_processing_metrics()
-        
-        # Error log
-        if st.session_state.error_messages:
-            st.subheader("⚠️ Issues & Warnings")
-            for error in st.session_state.error_messages[-3:]:  # Show last 3 errors
-                st.warning(error)
-    
-    def render_processing_metrics(self):
-        """Render processing metrics and statistics"""
-        results = st.session_state.processing_results
-        
-        st.subheader("📈 Processing Metrics")
-        
-        # Text extraction metrics
-        if 'document_result' in results:
-            doc_result = results['document_result']
-            text_extraction = doc_result.get('text_extraction', {})
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric(
-                    "Text Extracted",
-                    f"{len(text_extraction.get('extracted_text', ''))} chars"
-                )
-            
-            with col2:
-                confidence = text_extraction.get('processing_metadata', {}).get('overall_confidence', 0)
-                st.metric("OCR Confidence", f"{confidence:.1%}")
-        
-        # Language analysis metrics
-        if 'language_result' in results:
-            lang_result = results['language_result']
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                key_phrases = len(lang_result.get('key_phrases', {}).get('azure_key_phrases', []))
-                st.metric("Key Phrases", key_phrases)
-            
-            with col2:
-                quality = lang_result.get('study_assessment', {}).get('overall_quality', 'unknown')
-                quality_color = {
-                    'excellent': 'status-success',
-                    'good': 'status-success',
-                    'fair': 'status-warning',
-                    'poor': 'status-error'
-                }.get(quality, '')
-                
-                st.markdown(f'<p class="{quality_color}">Content Quality: {quality.title()}</p>', 
-                           unsafe_allow_html=True)
-    
-    def render_processing_stats(self):
-        """Render detailed processing statistics in sidebar"""
-        st.subheader("📊 Processing Stats")
-        
-        results = st.session_state.processing_results
-        
-        # Cache statistics
-        st.metric("Cache Hits", st.session_state.cache_hits)
-        
-        # Processing time
-        if st.session_state.total_processing_time > 0:
-            st.metric("Processing Time", f"{st.session_state.total_processing_time:.1f}s")
-        
-        # Content statistics
-        if 'language_result' in results:
-            lang_result = results['language_result']
-            
-            # Word count
-            word_count = lang_result.get('text_complexity', {}).get('word_count', 0)
-            st.metric("Word Count", word_count)
-            
-            # Entities found
-            entities = lang_result.get('entities', {}).get('unique_entities', 0)
-            st.metric("Entities Found", entities)
-    
-    def start_processing(self):
-        """Start the document processing workflow"""
-        st.session_state.processing_stage = 'processing'
-        st.session_state.processing_progress = 0
-        st.rerun()
-    
-    def process_document(self):
-        """Process uploaded document with progress tracking"""
-        start_time = time.time()
-        
-        try:
-            file_data = st.session_state.uploaded_file_data
-            
-            # Progress container
-            progress_container = st.empty()
-            status_container = st.empty()
-            
-            def update_progress(message: str):
-                progress_container.progress(st.session_state.processing_progress)
-                status_container.info(f"🔍 {message}")
-                st.session_state.processing_progress = min(st.session_state.processing_progress + 0.1, 0.9)
-            
-            # Check cache first
-            file_hash = file_data.get('file_hash')
-            cached_result = file_handler._get_cached_result(file_hash) if file_hash else None
-            
-            if cached_result:
-                st.session_state.cache_hits += 1
-                st.session_state.processing_results = cached_result
-                update_progress("Loading from cache...")
-                time.sleep(1)  # Brief delay to show cache hit
-                progress_container.progress(1.0)
-                status_container.success("✅ Processing completed (cached)")
-                st.session_state.processing_stage = 'analysis'
-                time.sleep(2)
-                st.rerun()
-                return
-            
-            update_progress("Preparing document for processing...")
-            
-            # Process with Azure Document Intelligence
-            document_result = azure_document_processor.extract_text_with_handwriting(
-                file_data['file_data']['file_bytes'],
-                file_data['file_data']['content_type'],
-                update_progress
-            )
-            
-            if document_result.get('status') == 'error':
-                raise Exception(document_result.get('error', 'Document processing failed'))
-            
-            # Store results
-            st.session_state.processing_results = {
-                'document_result': document_result,
-                'file_metadata': file_data['metadata']
-            }
-            
-            # Cache the result
-            if file_hash:
-                file_handler.cache_result(file_hash, st.session_state.processing_results)
-            
-            # Record processing time
-            st.session_state.total_processing_time = time.time() - start_time
-            
-            progress_container.progress(1.0)
-            status_container.success("✅ Document processing completed!")
-            
-            # Advance to next stage
-            st.session_state.processing_stage = 'analysis'
-            time.sleep(2)
-            st.rerun()
-            
-        except Exception as e:
-            error_msg = f"Document processing error: {str(e)}"
-            st.error(f"❌ {error_msg}")
-            st.session_state.error_messages.append(error_msg)
-            logger.error(error_msg)
-    
-    def analyze_content(self):
-        """Analyze extracted content with Azure Language Services"""
-        try:
-            results = st.session_state.processing_results
-            document_result = results['document_result']
-            
-            # Extract text for analysis
-            extracted_text = document_result.get('text_extraction', {}).get('extracted_text', '')
-            
-            if not extracted_text or len(extracted_text.strip()) < 10:
-                st.error("❌ Insufficient text extracted for analysis")
-                return
-            
-            # Progress tracking
-            progress_container = st.empty()
-            status_container = st.empty()
-            
-            def update_progress(message: str):
-                progress_container.progress(st.session_state.processing_progress)
-                status_container.info(f"🧠 {message}")
-                st.session_state.processing_progress = min(st.session_state.processing_progress + 0.1, 0.9)
-            
-            update_progress("Starting content analysis...")
-            
-            # Analyze with Azure Language Services
-            language_result = azure_language_processor.analyze_for_study_materials(
-                extracted_text,
-                update_progress
-            )
-            
-            if language_result.get('status') == 'error':
-                st.warning("⚠️ Language analysis encountered issues, using fallback processing")
-                if 'fallback_analysis' in language_result:
-                    language_result = language_result['fallback_analysis']
-            
-            # Update results
-            st.session_state.processing_results['language_result'] = language_result
-            
-            progress_container.progress(1.0)
-            status_container.success("✅ Content analysis completed!")
-            
-            # Show analysis summary
-            self.show_analysis_summary(language_result)
-            
-            # Advance to flashcard generation
-            st.session_state.processing_stage = 'generation'
-            
-            if st.button("🎴 Generate Flashcards", type="primary"):
-                st.rerun()
-            
-        except Exception as e:
-            error_msg = f"Content analysis error: {str(e)}"
-            st.error(f"❌ {error_msg}")
-            st.session_state.error_messages.append(error_msg)
-            logger.error(error_msg)
-    
-    def generate_flashcards(self):
-        """Generate flashcards using Gemini AI"""
-        try:
-            results = st.session_state.processing_results
-            language_result = results['language_result']
-            
-            # Extract necessary data
-            extracted_text = language_result.get('cleaned_text', '')
-            summary_data = language_result.get('summary', {})
-            key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
-            
-            if not extracted_text:
-                st.error("❌ No text available for flashcard generation")
-                return
-            
-            # Progress tracking
-            progress_container = st.empty()
-            status_container = st.empty()
-            
-            def update_progress(message: str):
-                progress_container.progress(st.session_state.processing_progress)
-                status_container.info(f"🎴 {message}")
-                st.session_state.processing_progress = min(st.session_state.processing_progress + 0.1, 0.9)
-            
-            update_progress("Generating flashcards with AI...")
-            
-            # Generate flashcards
-            flashcard_result = self.flashcard_generator.generate_comprehensive_flashcards(
-                extracted_text,
-                summary_data,
-                key_phrases,
-                update_progress
-            )
-            
-            if flashcard_result.get('error'):
-                raise Exception(flashcard_result['error'])
-            
-            # Store flashcards
-            st.session_state.flashcards = flashcard_result
-            
-            progress_container.progress(1.0)
-            status_container.success("✅ Flashcards generated successfully!")
-            
-            # Show generation summary
-            self.show_generation_summary(flashcard_result)
-            
-            # Advance to review stage
-            st.session_state.processing_stage = 'complete'
-            st.session_state.current_card_index = 0
-            st.session_state.show_answer = False
-            
-            if st.button("🎓 Start Studying", type="primary"):
-                st.rerun()
-            
-        except Exception as e:
-            error_msg = f"Flashcard generation error: {str(e)}"
-            st.error(f"❌ {error_msg}")
-            st.session_state.error_messages.append(error_msg)
-            logger.error(error_msg)
-    
-    def show_analysis_summary(self, language_result: Dict):
-        """Show summary of content analysis"""
-        st.subheader("📊 Content Analysis Summary")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            word_count = language_result.get('text_complexity', {}).get('word_count', 0)
-            st.metric("Words Analyzed", word_count)
-        
-        with col2:
-            key_phrases_count = len(language_result.get('key_phrases', {}).get('azure_key_phrases', []))
-            st.metric("Key Phrases Found", key_phrases_count)
-        
-        with col3:
-            quality = language_result.get('study_assessment', {}).get('overall_quality', 'unknown')
-            st.metric("Content Quality", quality.title())
-        
-        # Key phrases preview
-        key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])[:5]
-        if key_phrases:
-            st.write("**Top Key Phrases:**", ", ".join(key_phrases))
-        
-        # Recommendations
-        recommendations = language_result.get('study_assessment', {}).get('recommendations', [])
-        if recommendations:
-            st.write("**Recommendations:**")
-            for rec in recommendations:
-                st.write(f"• {rec}")
-    
-    def show_generation_summary(self, flashcard_result: Dict):
-        """Show summary of flashcard generation"""
-        st.subheader("🎴 Flashcard Generation Summary")
-        
-        flashcards = flashcard_result.get('flashcards', {})
-        
-        total_cards = 0
-        for card_type, cards in flashcards.items():
-            if isinstance(cards, list):
-                count = len(cards)
-                total_cards += count
-                st.write(f"**{card_type.title()} Cards:** {count}")
-        
-        st.success(f"🎉 Generated {total_cards} flashcards total!")
-        
-        # Quality indicators
-        generation_metadata = flashcard_result.get('generation_metadata', {})
-        if generation_metadata:
-            st.write("**Generation Quality:**")
-            avg_confidence = generation_metadata.get('average_confidence', 0)
-            st.write(f"• Average Confidence: {avg_confidence:.1%}")
-    
-    def record_confidence(self, level: str):
-        """Record user confidence for spaced repetition"""
-        # This would integrate with a spaced repetition system
-        current_card = st.session_state.current_card_index
-        st.success(f"✅ Recorded {level} confidence for card {current_card + 1}")
-        
-        # Auto-advance to next card
-        if st.session_state.current_card_index < len(self.get_all_flashcards()) - 1:
-            st.session_state.current_card_index += 1
-            st.session_state.show_answer = False
-            st.rerun()
-    
-    def get_all_flashcards(self) -> List[Dict]:
-        """Get all flashcards as a flat list"""
-        if not st.session_state.flashcards:
-            return []
-        
-        all_cards = []
-        flashcards = st.session_state.flashcards.get('flashcards', {})
-        
-        for card_type, cards in flashcards.items():
-            if isinstance(cards, list):
-                for card in cards:
-                    card['type'] = card_type
-                    all_cards.append(card)
-        
-        return all_cards
-    
-    def show_study_statistics(self, all_cards: List[Dict]):
-        """Show study session statistics"""
-        st.subheader("📊 Study Statistics")
-        
-        # Card type distribution
-        type_counts = {}
-        difficulty_counts = {}
-        
-        for card in all_cards:
-            card_type = card.get('type', 'unknown')
-            difficulty = card.get('difficulty', 'medium')
-            
-            type_counts[card_type] = type_counts.get(card_type, 0) + 1
-            difficulty_counts[difficulty] = difficulty_counts.get(difficulty, 0) + 1
-        
+        # Generation buttons in columns
         col1, col2 = st.columns(2)
         
         with col1:
-            st.write("**Cards by Type:**")
-            for card_type, count in type_counts.items():
-                st.write(f"• {card_type.title()}: {count}")
+            st.markdown("""
+            <div class="action-button-container">
+                <h3>🃏 Smart Flashcards</h3>
+                <p>Generate interactive flashcards optimized for study and retention using Gemini AI</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🚀 Generate Flashcards Only", use_container_width=True, type="primary"):
+                st.session_state.generation_choice = "flashcards_only"
+                self.start_processing()
         
         with col2:
-            st.write("**Cards by Difficulty:**")
-            for difficulty, count in difficulty_counts.items():
-                st.write(f"• {difficulty.title()}: {count}")
-    
-    def export_flashcards(self, all_cards: List[Dict]):
-        """Export flashcards in various formats"""
-        st.subheader("💾 Export Flashcards")
-        
-        export_format = st.selectbox(
-            "Choose export format:",
-            ["JSON", "CSV", "Text File", "Anki Deck"]
-        )
-        
-        if st.button("Download Flashcards"):
-            try:
-                if export_format == "JSON":
-                    export_data = json.dumps(all_cards, indent=2)
-                    st.download_button(
-                        "📥 Download JSON",
-                        export_data,
-                        f"flashcards_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        "application/json"
-                    )
-                
-                elif export_format == "Text File":
-                    text_data = self.format_flashcards_as_text(all_cards)
-                    st.download_button(
-                        "📥 Download Text",
-                        text_data,
-                        f"flashcards_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        "text/plain"
-                    )
-                
-                # Add other format implementations as needed
-                
-            except Exception as e:
-                st.error(f"Export failed: {str(e)}")
-    
-    def format_flashcards_as_text(self, all_cards: List[Dict]) -> str:
-        """Format flashcards as plain text"""
-        text_lines = ["AI-Generated Flashcards", "=" * 30, ""]
-        
-        for i, card in enumerate(all_cards, 1):
-            text_lines.extend([
-                f"Card {i} ({card.get('type', 'unknown').title()}) - {card.get('difficulty', 'medium').title()}",
-                "-" * 40,
-                f"Q: {card.get('question', 'No question')}",
-                f"A: {card.get('answer', 'No answer')}",
-                ""
-            ])
-        
-        return "\n".join(text_lines)
-    
-    def reset_application(self):
-        """Reset application to initial state"""
-        keys_to_reset = [
-            'uploaded_file_data', 'processing_results', 'flashcards',
-            'current_card_index', 'show_answer', 'processing_progress',
-            'error_messages'
-        ]
-        
-        for key in keys_to_reset:
-            if key in st.session_state:
-                del st.session_state[key]
-        
-        st.session_state.processing_stage = 'upload'
-        st.success("🔄 Application reset successfully!")
-    
-    def show_config_summary(self):
-        """Show configuration summary"""
-        st.subheader("⚙️ Configuration Summary")
-        
-        config_summary = Config.get_config_summary()
-        
-        for section, data in config_summary.items():
-            st.write(f"**{section.replace('_', ' ').title()}:**")
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    st.write(f"  • {key}: {value}")
-            else:
-                st.write(f"  • {data}")
-    
-    def export_results(self):
-        """Export all processing results"""
-        if st.session_state.processing_results:
-            export_data = {
-                'processing_results': st.session_state.processing_results,
-                'flashcards': st.session_state.flashcards,
-                'export_timestamp': datetime.now().isoformat()
-            }
+            st.markdown("""
+            <div class="action-button-container">
+                <h3>📄 AI Summary</h3>
+                <p>Create comprehensive summaries with key concepts using Azure Language Services</p>
+            </div>
+            """, unsafe_allow_html=True)
             
-            st.download_button(
-                "📥 Download Results",
-                json.dumps(export_data, indent=2),
-                f"processing_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                "application/json"
-            )
-        else:
-            st.warning("⚠️ No results to export")
-    
-    def render_footer(self):
-        """Render application footer"""
-        st.markdown("---")
+            if st.button("📝 Generate Summary Only", use_container_width=True, type="secondary"):
+                st.session_state.generation_choice = "summary_only"
+                self.start_processing()
+        
+        # Combined option
+        st.markdown("### 🌟 Recommended Option")
+        
         st.markdown("""
-        <div style="text-align: center; color: #666; font-size: 0.9em;">
-            🧠 AI-Powered Flashcard Generator | 
-            Built with Streamlit, Azure AI, and Google Gemini | 
-            © 2024
+        <div class="action-button-container">
+            <h3>🎯 Complete Study Package</h3>
+            <p>Generate both flashcards and comprehensive summaries for the ultimate study experience</p>
         </div>
         """, unsafe_allow_html=True)
+        
+        if st.button("🚀 Generate Everything (Recommended)", use_container_width=True, type="primary"):
+            st.session_state.generation_choice = "complete_package"
+            self.start_processing()
+        
+        # Additional options
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("⬅️ Go Back to Upload", use_container_width=True):
+                st.session_state.current_stage = 1
+                st.rerun()
+        
+        with col2:
+            # Show current settings
+            with st.expander("⚙️ Current Settings"):
+                settings = st.session_state.study_settings
+                st.write(f"**Flashcards:** {settings['num_flashcards']}")
+                st.write(f"**Difficulty:** {settings['difficulty']}")
+                st.write(f"**Focus Mode:** {'On' if settings['focus_mode'] else 'Off'}")
 
-def main():
-    """Main application entry point"""
-    try:
-        app = FlashcardApp()
-        app.run()
-    except Exception as e:
-        st.error(f"❌ Critical application error: {str(e)}")
-        logger.error(f"Critical application error: {e}")
+    def start_processing(self):
+        """Enhanced processing initiation with generation choice"""
+        if 'uploaded_file_data' in st.session_state:
+            st.session_state.current_stage = 3
+            st.rerun()
+        else:
+            st.error("No file uploaded")
 
+    def render_processing_stage(self):
+        """Enhanced processing stage with generation choice awareness"""
+        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        
+        # Dynamic header based on choice
+        if generation_choice == "flashcards_only":
+            st.header("🃏 Generating Your Flashcards")
+            st.markdown("Creating smart flashcards with AI...")
+        elif generation_choice == "summary_only":
+            st.header("📄 Creating Your Summary")
+            st.markdown("Analyzing and summarizing your content...")
+        else:
+            st.header("🔍 Creating Your Complete Study Package")
+            st.markdown("Generating flashcards and summaries with AI...")
+        
+        # Processing container
+        processing_container = st.container()
+        
+        if not st.session_state.processing_results:
+            with processing_container:
+                self.execute_processing_pipeline()
+        else:
+            self.display_processing_results()
+
+    def execute_processing_pipeline(self):
+        """Enhanced processing pipeline with generation choice support"""
+        try:
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            
+            file_data = st.session_state.uploaded_file_data.get('file_data', {})
+            file_bytes = file_data.get('file_bytes')
+            content_type = file_data.get('content_type')
+            
+            if not file_bytes:
+                st.error("❌ File data not available")
+                return
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            def update_progress(message: str, progress: float):
+                """Progress callback for Azure services"""
+                status_text.text(message)
+                progress_bar.progress(progress)
+                time.sleep(0.5)
+            
+            # Step 1: Azure Document Intelligence (always needed)
+            update_progress("🔍 Extracting text with Azure Document Intelligence...", 0.2)
+            
+            document_result = azure_document_processor.extract_text_with_handwriting(
+                file_bytes, content_type, update_progress
+            )
+            
+            if document_result.get('error'):
+                st.error(f"❌ Document processing failed: {document_result['error']}")
+                return
+            
+            extracted_text = document_result.get('extracted_text', '')
+            if not extracted_text or len(extracted_text.strip()) < 50:
+                st.error("❌ Insufficient text extracted from document")
+                return
+            
+            st.session_state.processing_results['document_result'] = document_result
+            
+            # Step 2: Azure Language Services (for summary or complete package)
+            language_result = None
+            if generation_choice in ["summary_only", "complete_package"]:
+                update_progress("🧠 Analyzing content with Azure Language Services...", 0.4)
+                
+                def language_progress_callback(message: str):
+                    progress_map = {
+                        "🧠 Starting advanced content analysis...": 0.41,
+                        "🧹 Preparing text for Azure analysis...": 0.45,
+                        "📝 Creating AI-powered summaries...": 0.55,
+                        "🔍 Extracting key educational concepts...": 0.65,
+                        "🏷️ Identifying educational entities...": 0.70,
+                        "😊 Analyzing educational tone...": 0.75,
+                        "📊 Assessing educational value...": 0.80,
+                        "✅ Advanced analysis completed!": 0.85
+                    }
+                    progress_value = progress_map.get(message, 0.6)
+                    update_progress(message, progress_value)
+                
+                language_result = azure_language_processor.analyze_for_study_materials(
+                    extracted_text, language_progress_callback
+                )
+                
+                if language_result.get('error'):
+                    st.warning(f"⚠️ Language analysis had issues: {language_result['error']}")
+                    language_result = azure_language_processor._create_fallback_analysis(extracted_text)
+                
+                st.session_state.processing_results['language_result'] = language_result
+            
+            # Step 3: Flashcard generation (for flashcards or complete package)
+            if generation_choice in ["flashcards_only", "complete_package"]:
+                update_progress("🃏 Generating flashcards with Gemini AI...", 0.9)
+                
+                # Use language result if available, otherwise use document result
+                text_for_flashcards = extracted_text
+                if language_result:
+                    text_for_flashcards = language_result.get('cleaned_text', extracted_text)
+                
+                generation_params = {
+                    'num_flashcards': st.session_state.study_settings['num_flashcards'],
+                    'difficulty_focus': st.session_state.study_settings['difficulty'],
+                    'key_phrases': language_result.get('key_phrases', {}).get('azure_key_phrases', []) if language_result else [],
+                    'educational_concepts': language_result.get('key_phrases', {}).get('educational_concepts', {}) if language_result else {},
+                    'study_assessment': language_result.get('study_assessment', {}) if language_result else {}
+                }
+                
+                def flashcard_progress_callback(message: str, progress: float):
+                    # Adjust progress to final range
+                    adjusted_progress = 0.9 + (progress * 0.1)
+                    update_progress(message, adjusted_progress)
+                
+                flashcards_result = self.gemini_generator.generate_enhanced_flashcards(
+                    text_for_flashcards, generation_params, flashcard_progress_callback
+                )
+                
+                if flashcards_result.get('error'):
+                    st.warning(f"⚠️ Flashcard generation had issues: {flashcards_result['error']}")
+                    flashcards_result = self.gemini_generator.generate_fallback_flashcards(text_for_flashcards)
+                
+                # Extract flashcards properly
+                flashcards = flashcards_result.get('flashcards', [])
+                if isinstance(flashcards, dict):
+                    flat_flashcards = []
+                    for category, cards in flashcards.items():
+                        if isinstance(cards, list):
+                            flat_flashcards.extend(cards)
+                    flashcards = flat_flashcards
+                
+                st.session_state.flashcards = flashcards
+                st.session_state.processing_results['flashcards_result'] = flashcards_result
+            
+            # Step 4: Cache results
+            update_progress("💾 Caching results for faster future access...", 0.98)
+            
+            file_hash = st.session_state.uploaded_file_data.get('file_hash')
+            if file_hash:
+                cache_data = {
+                    'document_result': document_result,
+                    'language_result': language_result,
+                    'generation_choice': generation_choice,
+                    'timestamp': datetime.now().isoformat()
+                }
+                file_handler.cache_result(file_hash, cache_data)
+            
+            update_progress("✅ Generation completed successfully!", 1.0)
+            
+            # Show processing summary
+            self.display_processing_summary()
+            
+        except Exception as e:
+            logger.error(f"Processing pipeline error: {e}")
+            st.error(f"❌ Processing failed: {str(e)}")
+
+    def display_processing_results(self):
+        """Display the results after processing is complete."""
+        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        
+        st.success("✅ Generation completed successfully!")
+        
+        # Show what was generated with explicit viewing options
+        if generation_choice == "flashcards_only":
+            st.markdown(f"### 🎉 Generated {len(st.session_state.flashcards)} flashcards!")
+            
+            # Preview a flashcard
+            if st.session_state.flashcards:
+                preview_card = st.session_state.flashcards[0]
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"""
+                    <div class="flashcard">
+                        <h4>Question Preview:</h4>
+                        <p>{preview_card.get('question', 'No question')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div class="flashcard-back">
+                        <h4>Answer Preview:</h4>
+                        <p>{preview_card.get('answer', 'No answer')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # ENHANCED: Explicit viewing options
+            st.markdown("### 🎯 What would you like to do?")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📖 View All Flashcards", type="secondary", use_container_width=True):
+                    st.session_state.viewing_mode = "flashcards_preview"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+            
+            with col2:
+                if st.button("🎯 Start Studying", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "study_mode"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+                
+        elif generation_choice == "summary_only":
+            st.markdown("### 📄 Summary Generated!")
+            
+            # Show summary preview
+            if 'language_result' in st.session_state.processing_results:
+                language_result = st.session_state.processing_results['language_result']
+                summary_data = language_result.get('summary', {})
+                best_summary = summary_data.get('best', '')
+                
+                if best_summary:
+                    st.markdown(f"""
+                    <div class="summary-box">
+                        <h3>📋 Summary Preview</h3>
+                        <p>{best_summary[:200]}{'...' if len(best_summary) > 200 else ''}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # ENHANCED: Explicit viewing options
+            st.markdown("### 🎯 What would you like to do?")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📖 View Complete Summary", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "summary_view"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+            
+            with col2:
+                if st.button("🔍 View Key Concepts", type="secondary", use_container_width=True):
+                    st.session_state.viewing_mode = "concepts_view"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+                
+        else:  # complete_package
+            st.markdown("### 🌟 Complete Study Package Generated!")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("🃏 Flashcards", len(st.session_state.flashcards))
+            with col2:
+                st.metric("📄 Summary Types", "3" if 'language_result' in st.session_state.processing_results else "1")
+            
+            # ENHANCED: Multiple explicit viewing options
+            st.markdown("### 🎯 What would you like to explore first?")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("📖 View Complete Summary", use_container_width=True):
+                    st.session_state.viewing_mode = "summary_view"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+            
+            with col2:
+                if st.button("🃏 Browse All Flashcards", use_container_width=True):
+                    st.session_state.viewing_mode = "flashcards_preview"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+            
+            with col3:
+                if st.button("🚀 Start Studying", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "study_mode"
+                    st.session_state.current_stage = 4
+                    st.rerun()
+        
+        # Additional options
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("⬅️ Generate Something Else", use_container_width=True):
+                # Clear results and go back to options
+                st.session_state.processing_results = {}
+                st.session_state.flashcards = []
+                st.session_state.current_stage = 2
+                st.rerun()
+        
+        with col2:
+            if st.button("🔄 Start Over", use_container_width=True):
+                self.reset_session()
+
+    def display_processing_summary(self):
+        """Enhanced processing summary with generation choice awareness"""
+        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        
+        st.markdown("### 📊 Generation Summary")
+        
+        # Dynamic metrics based on what was generated
+        if generation_choice == "flashcards_only":
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("🃏 Flashcards Generated", len(st.session_state.flashcards))
+            with col2:
+                difficulty = st.session_state.study_settings['difficulty']
+                st.metric("🎯 Difficulty Level", difficulty)
+            with col3:
+                quality_score = st.session_state.processing_results.get('flashcards_result', {}).get('generation_metadata', {}).get('quality_score', 0.8)
+                st.metric("⭐ Quality Score", f"{quality_score:.1%}")
+                
+        elif generation_choice == "summary_only":
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                language_result = st.session_state.processing_results.get('language_result', {})
+                key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
+                st.metric("🔑 Key Concepts", len(key_phrases))
+            with col2:
+                quality = language_result.get('study_assessment', {}).get('overall_quality', 'unknown')
+                st.metric("📚 Content Quality", quality.title())
+            with col3:
+                summary_types = len([k for k, v in language_result.get('summary', {}).items() if v])
+                st.metric("📄 Summary Types", summary_types)
+                
+        else:  # complete_package
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("🃏 Flashcards", len(st.session_state.flashcards))
+            with col2:
+                language_result = st.session_state.processing_results.get('language_result', {})
+                key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
+                st.metric("🔑 Key Concepts", len(key_phrases))
+            with col3:
+                quality = language_result.get('study_assessment', {}).get('overall_quality', 'unknown')
+                st.metric("📚 Content Quality", quality.title())
+            with col4:
+                summary_types = len([k for k, v in language_result.get('summary', {}).items() if v])
+                st.metric("📄 Summary Types", summary_types)
+
+    def render_study_mode(self):
+        """ENHANCED: Study mode with explicit viewing modes and generation choice awareness"""
+        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        viewing_mode = st.session_state.get('viewing_mode', 'study_mode')
+        
+        # Handle specific viewing modes first
+        if viewing_mode == "flashcards_preview":
+            self.render_flashcards_preview()
+            return
+        elif viewing_mode == "summary_view":
+            self.render_summary_view()
+            return
+        elif viewing_mode == "concepts_view":
+            self.render_concepts_view()
+            return
+        
+        # Default study mode based on generation choice
+        if generation_choice == "flashcards_only":
+            st.header("🃏 Study Your Flashcards")
+            tab1 = st.tabs(["🃏 Study Flashcards"])
+            with tab1[0]:
+                self.render_flashcard_study_interface()
+                
+        elif generation_choice == "summary_only":
+            st.header("📄 Review Your Summary")
+            tab1 = st.tabs(["📄 Summary Review"])
+            with tab1[0]:
+                self.render_enhanced_summary_tab()
+                
+        else:  # complete_package
+            st.header("📚 Study Mode")
+            # FIXED: Better tab labels with clearer text
+            tab1, tab2, tab3 = st.tabs(["🃏 Study Flashcards", "📄 Summary Review", "📊 Progress Analytics"])
+            
+            with tab1:
+                self.render_flashcard_study_interface()
+            with tab2:
+                self.render_enhanced_summary_tab()
+            with tab3:
+                self.render_progress_tab()
+
+    def render_flashcard_study_interface(self):
+        """Enhanced flashcard study interface"""
+        if not st.session_state.flashcards:
+            st.warning("⚠️ No flashcards available. Generate flashcards first!")
+            if st.button("🔙 Go Back to Generation Options"):
+                st.session_state.current_stage = 2
+                st.rerun()
+            return
+            
+        if 'current_card_index' not in st.session_state:
+            st.session_state.current_card_index = 0
+        if 'show_answer' not in st.session_state:
+            st.session_state.show_answer = False
+        if 'study_stats' not in st.session_state:
+            st.session_state.study_stats = {'correct': 0, 'incorrect': 0, 'total_answered': 0}
+        
+        total_cards = len(st.session_state.flashcards)
+        current_index = st.session_state.current_card_index
+        current_card = st.session_state.flashcards[current_index]
+        
+        # Card counter and progress
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown(f"**Card {current_index + 1} of {total_cards}**")
+            st.progress((current_index + 1) / total_cards)
+        
+        # Flashcard display
+        if not st.session_state.show_answer:
+            # Question side
+            st.markdown(f"""
+            <div class="flashcard">
+                <h3>🤔 Question</h3>
+                <p style="font-size: 1.2em; margin-top: 1rem;">{current_card.get('question', 'No question available')}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔍 Show Answer", use_container_width=True):
+                    st.session_state.show_answer = True
+                    st.rerun()
+            with col2:
+                if st.button("⏭️ Skip Card", use_container_width=True):
+                    self.next_card()
+        else:
+            # Answer side
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"""
+                <div class="flashcard">
+                    <h3>🤔 Question</h3>
+                    <p style="font-size: 1.1em;">{current_card.get('question', 'No question available')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="flashcard-back">
+                    <h3>💡 Answer</h3>
+                    <p style="font-size: 1.1em;">{current_card.get('answer', 'No answer available')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Self-assessment buttons
+            st.markdown("### 🎯 How did you do?")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("❌ Incorrect", use_container_width=True):
+                    self.record_answer(False)
+            with col2:
+                if st.button("✅ Correct", use_container_width=True):
+                    self.record_answer(True)
+            with col3:
+                if st.button("➡️ Next Card", use_container_width=True):
+                    self.next_card()
+        
+        # Study controls
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Restart Study Session", use_container_width=True):
+                st.session_state.current_card_index = 0
+                st.session_state.show_answer = False
+                st.session_state.study_stats = {'correct': 0, 'incorrect': 0, 'total_answered': 0}
+                st.rerun()
+        
+        with col2:
+            if st.button("🎲 Shuffle Cards", use_container_width=True):
+                random.shuffle(st.session_state.flashcards)
+                st.session_state.current_card_index = 0
+                st.session_state.show_answer = False
+                st.rerun()
+        
+        with col3:
+            if st.button("📊 View Stats", use_container_width=True):
+                self.show_study_stats()
+
+    def record_answer(self, correct: bool):
+        """Record study performance"""
+        stats = st.session_state.study_stats
+        stats['total_answered'] += 1
+        if correct:
+            stats['correct'] += 1
+        else:
+            stats['incorrect'] += 1
+        
+        self.next_card()
+
+    def next_card(self):
+        """Move to next flashcard"""
+        st.session_state.current_card_index = (st.session_state.current_card_index + 1) % len(st.session_state.flashcards)
+        st.session_state.show_answer = False
+        st.rerun()
+
+    def show_study_stats(self):
+        """Display study statistics"""
+        stats = st.session_state.study_stats
+        
+        if stats['total_answered'] > 0:
+            accuracy = (stats['correct'] / stats['total_answered']) * 100
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 Accuracy", f"{accuracy:.1f}%")
+            with col2:
+                st.metric("✅ Correct", stats['correct'])
+            with col3:
+                st.metric("❌ Incorrect", stats['incorrect'])
+        else:
+            st.info("📈 Start answering questions to see your progress!")
+
+    def render_enhanced_summary_tab(self):
+        """FIXED: Enhanced summary display with better styling and contrast"""
+        st.header("📄 Content Summary")
+        
+        if 'language_result' not in st.session_state.processing_results:
+            st.warning("⚠️ No summary available. Generate summary first!")
+            if st.button("🔙 Go Back to Generation Options"):
+                st.session_state.current_stage = 2
+                st.rerun()
+            return
+        
+        language_result = st.session_state.processing_results['language_result']
+        summary_data = language_result.get('summary', {})
+        
+        if isinstance(summary_data, dict) and summary_data:
+            # Best Summary (Primary)
+            best_summary = summary_data.get('best', '')
+            if best_summary and len(best_summary.strip()) > 50:
+                st.markdown(f"""
+                <div class="summary-box">
+                    <h3>🎯 AI-Powered Summary</h3>
+                    <p>{best_summary}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # FIXED: Summary type tabs with better labels and styling
+            summary_tabs = st.tabs(["🎓 Educational Focus", "📋 Key Sentences", "✨ AI Generated"])
+            
+            with summary_tabs[0]:
+                educational_summary = summary_data.get('educational', '')
+                if educational_summary and len(educational_summary.strip()) > 30:
+                    st.markdown(f"""
+                    <div class="educational-summary">
+                        <h3>🎓 Educational Focus Summary</h3>
+                        <p>{educational_summary}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.caption("🎯 Optimized for study materials and educational content")
+                else:
+                    st.info("📚 Educational summary not available")
+            
+            with summary_tabs[1]:
+                extractive_summary = summary_data.get('extractive', '')
+                if extractive_summary and len(extractive_summary.strip()) > 30:
+                    st.markdown(f"""
+                    <div class="extractive-summary">
+                        <h3>📋 Key Sentences from Original Text</h3>
+                        <p>{extractive_summary}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.caption("💡 Important sentences selected by Azure AI from your original text")
+                else:
+                    st.info("📋 Key sentences summary not available")
+            
+            with summary_tabs[2]:
+                abstractive_summary = summary_data.get('abstractive', '')
+                if abstractive_summary and len(abstractive_summary.strip()) > 30:
+                    st.markdown(f"""
+                    <div class="abstractive-summary">
+                        <h3>✨ AI Generated Summary</h3>
+                        <p>{abstractive_summary}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.caption("🤖 New summary text generated by Azure AI based on your content")
+                else:
+                    st.info("✨ AI generated summary not available")
+        
+        # Key concepts display
+        key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
+        
+        if key_phrases:
+            st.subheader("🔑 Key Concepts")
+            key_concepts_html = ""
+            for phrase in key_phrases[:15]:
+                key_concepts_html += f'<span class="key-concept-tag">{phrase}</span> '
+            
+            st.markdown(f"""
+            <div style="margin: 1.5rem 0;">
+                {key_concepts_html}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Enhanced content metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            word_count = language_result.get('text_complexity', {}).get('word_count', 0)
+            st.metric("📝 Word Count", f"{word_count:,}")
+        
+        with col2:
+            st.metric("🔑 Key Concepts", len(key_phrases))
+        
+        with col3:
+            quality = language_result.get('study_assessment', {}).get('overall_quality', 'unknown')
+            st.metric("📚 Content Quality", quality.title())
+        
+        with col4:
+            complexity = language_result.get('text_complexity', {}).get('complexity_level', 'unknown')
+            st.metric("🎓 Complexity", complexity.title())
+
+    def render_flashcards_preview(self):
+        """NEW: Preview all flashcards before studying"""
+        st.header("🃏 Your Generated Flashcards")
+        st.markdown(f"Browse through all **{len(st.session_state.flashcards)}** flashcards before you start studying")
+        
+        if not st.session_state.flashcards:
+            st.warning("⚠️ No flashcards available.")
+            return
+        
+        # Navigation controls
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🎯 Start Studying Now", type="primary", use_container_width=True):
+                st.session_state.viewing_mode = "study_mode"
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Display all flashcards in an organized way
+        for i, card in enumerate(st.session_state.flashcards, 1):
+            with st.expander(f"**Flashcard {i}** - {card.get('concept', 'General')}", expanded=i <= 3):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"""
+                    <div class="flashcard">
+                        <h4>🤔 Question</h4>
+                        <p>{card.get('question', 'No question available')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div class="flashcard-back">
+                        <h4>💡 Answer</h4>
+                        <p>{card.get('answer', 'No answer available')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Show difficulty and concept if available
+                if card.get('difficulty') or card.get('concept'):
+                    info_col1, info_col2 = st.columns(2)
+                    with info_col1:
+                        if card.get('difficulty'):
+                            st.caption(f"🎯 **Difficulty:** {card['difficulty'].title()}")
+                    with info_col2:
+                        if card.get('concept'):
+                            st.caption(f"📚 **Topic:** {card['concept']}")
+        
+        # Action buttons at the bottom
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("⬅️ Back to Results", use_container_width=True):
+                st.session_state.current_stage = 3
+                st.rerun()
+        
+        with col2:
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            if generation_choice in ["summary_only", "complete_package"]:
+                if st.button("📄 View Summary", use_container_width=True):
+                    st.session_state.viewing_mode = "summary_view"
+                    st.rerun()
+        
+        with col3:
+            if st.button("🎯 Start Studying", type="primary", use_container_width=True):
+                st.session_state.viewing_mode = "study_mode"
+                st.rerun()
+
+    def render_summary_view(self):
+        """NEW: Dedicated summary viewing mode"""
+        st.header("📄 Complete Summary View")
+        st.markdown("Review your AI-generated content summaries and key concepts")
+        
+        if 'language_result' not in st.session_state.processing_results:
+            st.warning("⚠️ No summary available.")
+            return
+        
+        # Navigation controls
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            if generation_choice in ["flashcards_only", "complete_package"]:
+                if st.button("🃏 View Flashcards", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "flashcards_preview"
+                    st.rerun()
+            else:
+                if st.button("🔍 View Key Concepts", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "concepts_view"
+                    st.rerun()
+        
+        st.markdown("---")
+        
+        # Use the existing enhanced summary tab logic
+        self.render_enhanced_summary_tab()
+        
+        # Action buttons at the bottom
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("⬅️ Back to Results", use_container_width=True):
+                st.session_state.current_stage = 3
+                st.rerun()
+        
+        with col2:
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            if generation_choice in ["flashcards_only", "complete_package"]:
+                if st.button("🃏 Browse Flashcards", use_container_width=True):
+                    st.session_state.viewing_mode = "flashcards_preview"
+                    st.rerun()
+        
+        with col3:
+            if generation_choice != "summary_only":
+                if st.button("🎯 Start Studying", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "study_mode"
+                    st.rerun()
+
+    def render_concepts_view(self):
+        """NEW: Dedicated key concepts viewing mode"""
+        st.header("🔑 Key Concepts & Analysis")
+        st.markdown("Explore the educational concepts and analysis extracted from your content")
+        
+        if 'language_result' not in st.session_state.processing_results:
+            st.warning("⚠️ No concept analysis available.")
+            return
+        
+        language_result = st.session_state.processing_results['language_result']
+        
+        # Navigation controls
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("📄 View Complete Summary", type="primary", use_container_width=True):
+                st.session_state.viewing_mode = "summary_view"
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Key concepts display
+        key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
+        educational_concepts = language_result.get('key_phrases', {}).get('educational_concepts', {})
+        
+        if key_phrases:
+            st.subheader("🔑 Key Concepts")
+            key_concepts_html = ""
+            for phrase in key_phrases:
+                key_concepts_html += f'<span class="key-concept-tag">{phrase}</span> '
+            
+            st.markdown(f"""
+            <div style="margin: 1.5rem 0;">
+                {key_concepts_html}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Educational concept categories
+        if educational_concepts and isinstance(educational_concepts, dict):
+            st.subheader("📚 Educational Concept Categories")
+            
+            for category, concepts in educational_concepts.items():
+                if concepts:
+                    st.markdown(f"""
+                    <div class="concept-category">
+                        <h4>{category.replace('_', ' ').title()}</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    concepts_html = ""
+                    for concept in concepts[:8]:  # Limit display
+                        concepts_html += f'<span class="key-concept-tag">{concept}</span> '
+                    
+                    st.markdown(f"""
+                    <div style="margin: 0.5rem 0 1.5rem 0;">
+                        {concepts_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Content analysis metrics
+        st.subheader("📊 Content Analysis")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            word_count = language_result.get('text_complexity', {}).get('word_count', 0)
+            st.metric("📝 Word Count", f"{word_count:,}")
+        
+        with col2:
+            st.metric("🔑 Key Phrases", len(key_phrases))
+        
+        with col3:
+            quality = language_result.get('study_assessment', {}).get('overall_quality', 'unknown')
+            st.metric("📚 Content Quality", quality.title())
+        
+        with col4:
+            complexity = language_result.get('text_complexity', {}).get('complexity_level', 'unknown')
+            st.metric("🎓 Complexity", complexity.title())
+        
+        # Educational analysis
+        sentiment = language_result.get('sentiment', {})
+        if sentiment and isinstance(sentiment, dict):
+            st.subheader("🧠 Educational Analysis")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                educational_tone = sentiment.get('educational_tone', 'informational')
+                st.metric("📚 Educational Tone", educational_tone.title())
+            
+            with col2:
+                learning_difficulty = sentiment.get('learning_difficulty', 'moderate')
+                st.metric("🎯 Learning Difficulty", learning_difficulty.title())
+            
+            with col3:
+                engagement_level = sentiment.get('engagement_level', 'neutral')
+                st.metric("⚡ Engagement Level", engagement_level.title())
+        
+        # Action buttons at the bottom
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("⬅️ Back to Results", use_container_width=True):
+                st.session_state.current_stage = 3
+                st.rerun()
+        
+        with col2:
+            if st.button("📄 View Summary", use_container_width=True):
+                st.session_state.viewing_mode = "summary_view"
+                st.rerun()
+        
+        with col3:
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            if generation_choice in ["flashcards_only", "complete_package"]:
+                if st.button("🃏 Browse Flashcards", type="primary", use_container_width=True):
+                    st.session_state.viewing_mode = "flashcards_preview"
+                    st.rerun()
+
+    def render_progress_tab(self):
+        """Enhanced progress tab with study analytics"""
+        st.header("📊 Study Progress Analytics")
+        
+        if 'study_stats' in st.session_state:
+            stats = st.session_state.study_stats
+            
+            if stats['total_answered'] > 0:
+                accuracy = (stats['correct'] / stats['total_answered']) * 100
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("📊 Accuracy", f"{accuracy:.1f}%")
+                with col2:
+                    st.metric("✅ Correct", stats['correct'])
+                with col3:
+                    st.metric("❌ Incorrect", stats['incorrect'])
+                with col4:
+                    st.metric("📝 Total Answered", stats['total_answered'])
+                
+                # Progress visualization
+                if stats['total_answered'] > 0:
+                    st.subheader("📈 Performance Overview")
+                    
+                    # Create a simple chart
+                    chart_data = {
+                        'Category': ['Correct', 'Incorrect'],
+                        'Count': [stats['correct'], stats['incorrect']]
+                    }
+                    st.bar_chart(chart_data)
+                
+                # Study recommendations
+                st.subheader("💡 Study Recommendations")
+                
+                if accuracy >= 90:
+                    st.success("🌟 Excellent work! You've mastered this material. Consider reviewing new topics or advanced concepts.")
+                elif accuracy >= 80:
+                    st.info("👍 Great progress! Review the cards you missed and try again to reach mastery.")
+                elif accuracy >= 70:
+                    st.warning("📚 Good start! Focus on understanding the concepts you found challenging.")
+                else:
+                    st.error("💪 Keep practicing! Consider reviewing the source material and trying again.")
+            
+            else:
+                st.info("📚 Start studying to see your progress!")
+                
+                # Show study tips
+                st.subheader("💡 Study Tips")
+                st.markdown("""
+                - **Active Recall**: Try to answer before revealing the answer
+                - **Spaced Repetition**: Review cards you got wrong more frequently
+                - **Understanding**: Focus on why the answer is correct, not just memorizing
+                - **Regular Practice**: Short, frequent study sessions are more effective
+                """)
+        
+        else:
+            st.info("📈 No study data available yet.")
+            st.markdown("Start studying flashcards to track your progress here!")
+
+# Main application runner
 if __name__ == "__main__":
-    main()
+    app = FlashcardApp()
+    app.run()

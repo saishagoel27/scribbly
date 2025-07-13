@@ -3,3 +3,4 @@ venv
 __pycache__
 cache
 flashcard_app.log
+app.log

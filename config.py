@@ -1,7 +1,7 @@
-import os
+import os 
 import logging
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Dict, Tuple, Optional, List
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -9,319 +9,211 @@ load_dotenv()
 
 class Config:
     """
-    This class manages all application settings, API credentials, and provides
-    validation methods for ensuring proper environment setup.
+    SIMPLIFIED: Clean configuration management for AI Study Helper
+    
+    Removed redundant properties and backward compatibility bloat
     """
     
-    # Azure Document Intelligence (OCR Service)
+    # ========== AZURE SERVICES ==========
+    # Azure Document Intelligence
     AZURE_DOC_INTELLIGENCE_ENDPOINT = os.getenv('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT')
     AZURE_DOC_INTELLIGENCE_KEY = os.getenv('AZURE_DOCUMENT_INTELLIGENCE_KEY')
     
-    # Azure Language Services (Text Analytics)
+    # Azure Language Services
     AZURE_LANGUAGE_ENDPOINT = os.getenv('AZURE_LANGUAGE_ENDPOINT')
     AZURE_LANGUAGE_KEY = os.getenv('AZURE_LANGUAGE_KEY')
     
-    # Google Gemini API (Flashcard Generation)
+    # ========== AI SERVICES ==========
+    # Google Gemini API
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     
-    # Debug and Development
-    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-    ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
-    
-    # File Processing Limits
+    # ========== APP SETTINGS ==========
+    # File handling
     MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '10'))
     MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
     SUPPORTED_FILE_TYPES = ['pdf', 'jpg', 'jpeg', 'png', 'txt', 'docx']
     
-    # Text Processing Limits
-    MAX_TEXT_LENGTH = int(os.getenv('MAX_TEXT_LENGTH', '50000'))
-    MAX_FLASHCARDS_PER_SESSION = int(os.getenv('MAX_FLASHCARDS_PER_SESSION', '20'))
-    
-    PAGE_TITLE = "🧠 AI-Powered Flashcard Generator"
+    # Streamlit UI
+    PAGE_TITLE = "🧠 AI Study Helper"
     PAGE_ICON = "🧠"
     LAYOUT = "wide"
-    INITIAL_SIDEBAR_STATE = "expanded"
     
-    # UI Theme Colors
-    PRIMARY_COLOR = "#1f77b4"
-    BACKGROUND_COLOR = "#ffffff"
-    SECONDARY_BACKGROUND_COLOR = "#f0f2f6"
-    TEXT_COLOR = "#262730"
-    
-    
-    FLASHCARD_TYPES = ["definition", "conceptual", "application", "detail"]
-    DIFFICULTY_LEVELS = ["easy", "medium", "hard"]
-    
-    # Flashcard Generation Limits
-    MAX_DEFINITION_CARDS = 6
-    MAX_CONCEPTUAL_CARDS = 5
-    MAX_APPLICATION_CARDS = 4
-    MAX_DETAIL_CARDS = 3
+    # Processing limits
     MAX_TOTAL_CARDS = 15
+    AZURE_TIMEOUT = 30
+    DEFAULT_FLASHCARD_COUNT = 10
     
-    # Quality Thresholds
-    MIN_QUESTION_LENGTH = 10
-    MAX_QUESTION_LENGTH = 200
-    MIN_ANSWER_LENGTH = 10
-    MAX_ANSWER_LENGTH = 500
-    MIN_CONFIDENCE_SCORE = 0.3
-    
+    # Caching
+    CACHE_ENABLED = True
+    CACHE_TTL_HOURS = 24
     CACHE_DIR = Path("cache")
-    CACHE_ENABLED = os.getenv('CACHE_ENABLED', 'True').lower() == 'true'
-    CACHE_TTL_HOURS = int(os.getenv('CACHE_TTL_HOURS', '24'))
     
-    # API Timeout Settings (in seconds)
-    AZURE_TIMEOUT = int(os.getenv('AZURE_TIMEOUT', '30'))
-    GEMINI_TIMEOUT = int(os.getenv('GEMINI_TIMEOUT', '45'))
-    
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
-    LOG_FILE = os.getenv('LOG_FILE', 'flashcard_app.log')
-    LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-    
-    # ============================================================================
-    # BACKWARD COMPATIBILITY (Legacy property names)
-    # ============================================================================
-    
-    @property
-    def doc_intelligence_endpoint(self):
-        """Legacy property for backward compatibility"""
-        return self.AZURE_DOC_INTELLIGENCE_ENDPOINT
-    
-    @property
-    def doc_intelligence_key(self):
-        """Legacy property for backward compatibility"""
-        return self.AZURE_DOC_INTELLIGENCE_KEY
-    
-    @property
-    def language_endpoint(self):
-        """Legacy property for backward compatibility"""
-        return self.AZURE_LANGUAGE_ENDPOINT
-    
-    @property
-    def language_key(self):
-        """Legacy property for backward compatibility"""
-        return self.AZURE_LANGUAGE_KEY
-    
-    @property
-    def gemini_api_key(self):
-        """Legacy property for backward compatibility"""
-        return self.GEMINI_API_KEY
-    
-    @property
-    def max_file_size_mb(self):
-        """Legacy property for backward compatibility"""
-        return self.MAX_FILE_SIZE_MB
-    
-    @property
-    def supported_file_types(self):
-        """Legacy property for backward compatibility"""
-        return self.SUPPORTED_FILE_TYPES
+    # ========== SERVICE AVAILABILITY CHECKS ==========
     
     @classmethod
     def has_document_intelligence(cls) -> bool:
-        """Check if Azure Document Intelligence is properly configured"""
+        """Check if Azure Document Intelligence is configured"""
         return bool(cls.AZURE_DOC_INTELLIGENCE_ENDPOINT and cls.AZURE_DOC_INTELLIGENCE_KEY)
     
     @classmethod
     def has_language_service(cls) -> bool:
-        """Check if Azure Language Service is properly configured"""
+        """Check if Azure Language Service is configured"""
         return bool(cls.AZURE_LANGUAGE_ENDPOINT and cls.AZURE_LANGUAGE_KEY)
     
     @classmethod
     def has_gemini(cls) -> bool:
-        """Check if Google Gemini API is properly configured"""
+        """Check if Google Gemini is configured"""
         return bool(cls.GEMINI_API_KEY)
     
     @classmethod
     def get_available_services(cls) -> Dict[str, bool]:
-        """Get availability status of all services"""
+        """Get status of all AI services"""
         return {
-            "azure_document_intelligence": cls.has_document_intelligence(),
-            "azure_language_service": cls.has_language_service(),
-            "google_gemini": cls.has_gemini()
+            "azure_document": cls.has_document_intelligence(),
+            "azure_language": cls.has_language_service(),
+            "gemini": cls.has_gemini()
         }
     
     @classmethod
-    def get_missing_services(cls) -> list:
-        """Get list of missing/unavailable services"""
-        services = cls.get_available_services()
-        return [service for service, available in services.items() if not available]
-    
-    @classmethod
-    def validate_config(cls) -> Tuple[bool, str]:
-        """
-        Validate all configuration settings
-        
-        Returns:
-            Tuple[bool, str]: (is_valid, message)
-        """
-        missing_vars = []
-        warnings = []
-        
-        # Check required API credentials
+    def get_missing_services(cls) -> List[str]:
+        """Get list of missing critical services"""
+        missing = []
         if not cls.has_document_intelligence():
-            missing_vars.extend(['AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT', 'AZURE_DOCUMENT_INTELLIGENCE_KEY'])
-        
-        if not cls.has_language_service():
-            missing_vars.extend(['AZURE_LANGUAGE_ENDPOINT', 'AZURE_LANGUAGE_KEY'])
-        
+            missing.append("Azure Document Intelligence")
         if not cls.has_gemini():
-            missing_vars.append('GEMINI_API_KEY')
-        
-        # Check optional but recommended settings
-        if cls.MAX_FILE_SIZE_MB > 50:
-            warnings.append(f"Large file size limit ({cls.MAX_FILE_SIZE_MB}MB) may cause performance issues")
-        
-        if cls.MAX_FLASHCARDS_PER_SESSION > 30:
-            warnings.append(f"High flashcard limit ({cls.MAX_FLASHCARDS_PER_SESSION}) may impact user experience")
-        
-        # Return validation results
-        if missing_vars:
-            error_msg = f"❌ Missing required environment variables: {', '.join(missing_vars)}"
-            if warnings:
-                error_msg += f"\n⚠️ Warnings: {'; '.join(warnings)}"
-            return False, error_msg
-        
-        success_msg = "✅ All required configuration is valid"
-        if warnings:
-            success_msg += f"\n⚠️ Warnings: {'; '.join(warnings)}"
-        
-        return True, success_msg
+            missing.append("Google Gemini")
+        return missing
     
     @classmethod
-    def validate_environment(cls) -> Tuple[bool, str]:
-        """
-        Comprehensive environment validation including file system checks
+    def is_production_ready(cls) -> Tuple[bool, str]:
+        """Check if app is ready for production use"""
+        missing = cls.get_missing_services()
         
-        Returns:
-            Tuple[bool, str]: (is_valid, message)
-        """
-        # First check basic config
-        config_valid, config_msg = cls.validate_config()
-        if not config_valid:
-            return config_valid, config_msg
+        if missing:
+            return False, f"Missing services: {', '.join(missing)}"
         
-        issues = []
-        
-        try:
-            # Check cache directory permissions
-            cls.CACHE_DIR.mkdir(exist_ok=True)
-            if not cls.CACHE_DIR.is_dir():
-                issues.append("Cannot create cache directory")
-            
-            # Check log file permissions
-            log_path = Path(cls.LOG_FILE)
-            try:
-                log_path.touch(exist_ok=True)
-                if not log_path.exists():
-                    issues.append("Cannot create log file")
-            except PermissionError:
-                issues.append("No permission to create log file")
-            
-        except Exception as e:
-            issues.append(f"File system check failed: {str(e)}")
-        
-        if issues:
-            return False, f"{config_msg}\n❌ Environment issues: {'; '.join(issues)}"
-        
-        return True, f"{config_msg}\n✅ Environment is fully configured"
+        return True, "All services configured"
     
-    @classmethod
-    def setup_logging(cls) -> None:
-        """Configure application-wide logging"""
-        # Ensure log directory exists
-        log_path = Path(cls.LOG_FILE)
-        log_path.parent.mkdir(exist_ok=True)
-        
-        # Configure logging
-        logging.basicConfig(
-            level=getattr(logging, cls.LOG_LEVEL, logging.INFO),
-            format=cls.LOG_FORMAT,
-            datefmt=cls.LOG_DATE_FORMAT,
-            handlers=[
-                logging.FileHandler(cls.LOG_FILE, encoding='utf-8'),
-                logging.StreamHandler()
-            ],
-            force=True  # Override any existing configuration
-        )
-        
-        # Set specific logger levels for external libraries
-        logging.getLogger('azure').setLevel(logging.WARNING)
-        logging.getLogger('google').setLevel(logging.WARNING)
-        logging.getLogger('urllib3').setLevel(logging.WARNING)
-        
-        logger = logging.getLogger(__name__)
-        logger.info("🚀 Logging configured successfully")
-        
-        # Log configuration status
-        is_valid, msg = cls.validate_config()
-        if is_valid:
-            logger.info(msg)
-        else:
-            logger.error(msg)
-    
-    @classmethod
-    def setup_cache(cls) -> None:
-        """Initialize cache directory and settings"""
-        if cls.CACHE_ENABLED:
-            cls.CACHE_DIR.mkdir(exist_ok=True)
-            logger = logging.getLogger(__name__)
-            logger.info(f"📁 Cache directory initialized: {cls.CACHE_DIR}")
+    # ========== INITIALIZATION ==========
     
     @classmethod
     def initialize_app(cls) -> Tuple[bool, str]:
-        """
-        Initialize the entire application configuration
-        
-        Returns:
-            Tuple[bool, str]: (success, message)
-        """
+        """Simple app initialization with clear feedback"""
         try:
-            # Setup logging first
+            # Check critical services
+            is_ready, message = cls.is_production_ready()
+            
+            if not is_ready:
+                return False, message
+            
+            # Setup cache directory
+            if cls.CACHE_ENABLED:
+                cls.CACHE_DIR.mkdir(exist_ok=True)
+            
+            # Setup logging
             cls.setup_logging()
             
-            # Validate environment
-            env_valid, env_msg = cls.validate_environment()
-            if not env_valid:
-                return False, env_msg
-            
-            # Setup cache
-            cls.setup_cache()
-            
-            # Log successful initialization
-            logger = logging.getLogger(__name__)
-            logger.info("🎉 Application configuration initialized successfully")
-            
-            return True, env_msg
+            return True, "Application initialized successfully"
             
         except Exception as e:
-            error_msg = f"❌ Failed to initialize application: {str(e)}"
-            print(error_msg)  # Print to console since logging might not be set up
-            return False, error_msg
+            return False, f"Initialization error: {str(e)}"
     
     @classmethod
-    def get_config_summary(cls) -> Dict[str, Any]:
-        """Get a summary of current configuration for debugging"""
+    def setup_logging(cls):
+        """SIMPLIFIED: Basic logging setup"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler('app.log') if cls.CACHE_ENABLED else logging.NullHandler()
+            ]
+        )
+    
+    # ========== ENVIRONMENT INFO ==========
+    
+    @classmethod
+    def get_environment_info(cls) -> Dict[str, any]:
+        """Get environment configuration info for debugging"""
         return {
-            "environment": cls.ENVIRONMENT,
-            "debug_mode": cls.DEBUG,
-            "services_available": cls.get_available_services(),
+            "services_configured": cls.get_available_services(),
             "file_limits": {
                 "max_size_mb": cls.MAX_FILE_SIZE_MB,
                 "supported_types": cls.SUPPORTED_FILE_TYPES
             },
-            "flashcard_settings": {
-                "max_total": cls.MAX_TOTAL_CARDS,
-                "types": cls.FLASHCARD_TYPES,
-                "difficulties": cls.DIFFICULTY_LEVELS
+            "processing_limits": {
+                "max_cards": cls.MAX_TOTAL_CARDS,
+                "azure_timeout": cls.AZURE_TIMEOUT
             },
-            "cache_enabled": cls.CACHE_ENABLED,
-            "log_level": cls.LOG_LEVEL
+            "caching": {
+                "enabled": cls.CACHE_ENABLED,
+                "cache_dir": str(cls.CACHE_DIR)
+            }
+        }
+    
+    # ========== VALIDATION HELPERS ==========
+    
+    @classmethod
+    def validate_file_type(cls, file_extension: str) -> bool:
+        """Validate if file type is supported"""
+        return file_extension.lower() in cls.SUPPORTED_FILE_TYPES
+    
+    @classmethod
+    def validate_file_size(cls, file_size_bytes: int) -> bool:
+        """Validate if file size is within limits"""
+        return file_size_bytes <= cls.MAX_FILE_SIZE_BYTES
+    
+    @classmethod
+    def get_azure_config(cls) -> Dict[str, Optional[str]]:
+        """Get Azure configuration for debugging"""
+        return {
+            "document_endpoint": cls.AZURE_DOC_INTELLIGENCE_ENDPOINT,
+            "document_key_configured": bool(cls.AZURE_DOC_INTELLIGENCE_KEY),
+            "language_endpoint": cls.AZURE_LANGUAGE_ENDPOINT,
+            "language_key_configured": bool(cls.AZURE_LANGUAGE_KEY)
         }
 
-# Create global config instance for backward compatibility
+# Create global config instance for easy access
 config = Config()
 
 # Auto-initialize logging when module is imported
 Config.setup_logging()
+
+# ========== HELPER FUNCTIONS ==========
+
+def get_service_status_message() -> str:
+    """Get human-readable service status"""
+    services = Config.get_available_services()
+    
+    available = [name for name, status in services.items() if status]
+    missing = [name for name, status in services.items() if not status]
+    
+    message = []
+    
+    if available:
+        message.append(f"✅ Available: {', '.join(available)}")
+    
+    if missing:
+        message.append(f"❌ Missing: {', '.join(missing)}")
+    
+    return " | ".join(message) if message else "No services configured"
+
+def check_environment_variables() -> Dict[str, bool]:
+    """Quick check of all required environment variables"""
+    required_vars = {
+        'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT': bool(os.getenv('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT')),
+        'AZURE_DOCUMENT_INTELLIGENCE_KEY': bool(os.getenv('AZURE_DOCUMENT_INTELLIGENCE_KEY')),
+        'GEMINI_API_KEY': bool(os.getenv('GEMINI_API_KEY'))
+    }
+    
+    optional_vars = {
+        'AZURE_LANGUAGE_ENDPOINT': bool(os.getenv('AZURE_LANGUAGE_ENDPOINT')),
+        'AZURE_LANGUAGE_KEY': bool(os.getenv('AZURE_LANGUAGE_KEY')),
+        'MAX_FILE_SIZE_MB': bool(os.getenv('MAX_FILE_SIZE_MB'))
+    }
+    
+    return {
+        "required": required_vars,
+        "optional": optional_vars,
+        "all_required_present": all(required_vars.values())
+    }
