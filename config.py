@@ -8,33 +8,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    """
-    SIMPLIFIED: Clean configuration management for AI Study Helper
-    
-    Removed redundant properties and backward compatibility bloat
-    """
+    """Configuration management for Scribbly"""
     
     # ========== AZURE SERVICES ==========
-    # Azure Document Intelligence
-    AZURE_DOC_INTELLIGENCE_ENDPOINT = os.getenv('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT')
-    AZURE_DOC_INTELLIGENCE_KEY = os.getenv('AZURE_DOCUMENT_INTELLIGENCE_KEY')
+    # Azure Document Intelligence 
+    AZURE_DOC_INTELLIGENCE_ENDPOINT = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
+    AZURE_DOC_INTELLIGENCE_KEY = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
     
     # Azure Language Services
-    AZURE_LANGUAGE_ENDPOINT = os.getenv('AZURE_LANGUAGE_ENDPOINT')
-    AZURE_LANGUAGE_KEY = os.getenv('AZURE_LANGUAGE_KEY')
+    AZURE_LANGUAGE_ENDPOINT = os.getenv("AZURE_LANGUAGE_ENDPOINT")
+    AZURE_LANGUAGE_KEY = os.getenv("AZURE_LANGUAGE_KEY")
     
     # ========== AI SERVICES ==========
     # Google Gemini API
-    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     
     # ========== APP SETTINGS ==========
     # File handling
-    MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '10'))
+    MAX_FILE_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '100'))
     MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
     SUPPORTED_FILE_TYPES = ['pdf', 'jpg', 'jpeg', 'png', 'txt', 'docx']
     
     # Streamlit UI
-    PAGE_TITLE = "🧠 AI Study Helper"
+    PAGE_TITLE = "🧠 Scribbly - AI Study Helper"
     PAGE_ICON = "🧠"
     LAYOUT = "wide"
     
@@ -51,27 +47,42 @@ class Config:
     # ========== SERVICE AVAILABILITY CHECKS ==========
     
     @classmethod
+    def validate_azure_document_intelligence(cls) -> bool:
+        """Check if Azure Document Intelligence is properly configured"""
+        return bool(cls.AZURE_DOC_INTELLIGENCE_ENDPOINT and cls.AZURE_DOC_INTELLIGENCE_KEY)
+    
+    @classmethod
+    def validate_azure_language(cls) -> bool:
+        """Check if Azure Language Services is properly configured"""
+        return bool(cls.AZURE_LANGUAGE_ENDPOINT and cls.AZURE_LANGUAGE_KEY)
+    
+    @classmethod
+    def validate_gemini(cls) -> bool:
+        """Check if Gemini AI is properly configured"""
+        return bool(cls.GEMINI_API_KEY)
+    
+    @classmethod
     def has_document_intelligence(cls) -> bool:
         """Check if Azure Document Intelligence is configured"""
-        return bool(cls.AZURE_DOC_INTELLIGENCE_ENDPOINT and cls.AZURE_DOC_INTELLIGENCE_KEY)
+        return cls.validate_azure_document_intelligence()
     
     @classmethod
     def has_language_service(cls) -> bool:
         """Check if Azure Language Service is configured"""
-        return bool(cls.AZURE_LANGUAGE_ENDPOINT and cls.AZURE_LANGUAGE_KEY)
+        return cls.validate_azure_language()
     
     @classmethod
     def has_gemini(cls) -> bool:
         """Check if Google Gemini is configured"""
-        return bool(cls.GEMINI_API_KEY)
+        return cls.validate_gemini()
     
     @classmethod
     def get_available_services(cls) -> Dict[str, bool]:
         """Get status of all AI services"""
         return {
-            "azure_document": cls.has_document_intelligence(),
-            "azure_language": cls.has_language_service(),
-            "gemini": cls.has_gemini()
+            "azure_document_intelligence": cls.validate_azure_document_intelligence(),
+            "azure_language_services": cls.validate_azure_language(),
+            "gemini_ai": cls.validate_gemini()
         }
     
     @classmethod
@@ -93,6 +104,27 @@ class Config:
             return False, f"Missing services: {', '.join(missing)}"
         
         return True, "All services configured"
+    
+    # ========== VALIDATION HELPERS - FIXED ==========
+    
+    @classmethod
+    def validate_file_type(cls, file_extension: str) -> bool:
+        """Validate if file type is supported"""
+        return file_extension.lower() in cls.SUPPORTED_FILE_TYPES
+    
+    @classmethod
+    def validate_file_size(cls, file_size_bytes: int) -> Dict[str, any]:
+        """Validate if file size is within limits - FIXED to return dict"""
+        is_valid = file_size_bytes <= cls.MAX_FILE_SIZE_BYTES
+        
+        if is_valid:
+            return {'valid': True}
+        else:
+            size_mb = file_size_bytes / (1024 * 1024)
+            return {
+                'valid': False, 
+                'error': f"File too large ({size_mb:.1f}MB). Maximum allowed: {cls.MAX_FILE_SIZE_MB}MB"
+            }
     
     # ========== INITIALIZATION ==========
     
@@ -120,7 +152,7 @@ class Config:
     
     @classmethod
     def setup_logging(cls):
-        """SIMPLIFIED: Basic logging setup"""
+        """Basic logging setup"""
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -151,18 +183,6 @@ class Config:
             }
         }
     
-    # ========== VALIDATION HELPERS ==========
-    
-    @classmethod
-    def validate_file_type(cls, file_extension: str) -> bool:
-        """Validate if file type is supported"""
-        return file_extension.lower() in cls.SUPPORTED_FILE_TYPES
-    
-    @classmethod
-    def validate_file_size(cls, file_size_bytes: int) -> bool:
-        """Validate if file size is within limits"""
-        return file_size_bytes <= cls.MAX_FILE_SIZE_BYTES
-    
     @classmethod
     def get_azure_config(cls) -> Dict[str, Optional[str]]:
         """Get Azure configuration for debugging"""
@@ -172,6 +192,23 @@ class Config:
             "language_endpoint": cls.AZURE_LANGUAGE_ENDPOINT,
             "language_key_configured": bool(cls.AZURE_LANGUAGE_KEY)
         }
+    
+    @classmethod
+    def print_debug_info(cls):
+        """Print debug information about loaded credentials"""
+        print("\n🔍 Configuration Debug Info:")
+        print(f"Azure Doc Intelligence Endpoint: {'✅ Set' if cls.AZURE_DOC_INTELLIGENCE_ENDPOINT else '❌ Missing'}")
+        print(f"Azure Doc Intelligence Key: {'✅ Set' if cls.AZURE_DOC_INTELLIGENCE_KEY else '❌ Missing'}")
+        print(f"Azure Language Endpoint: {'✅ Set' if cls.AZURE_LANGUAGE_ENDPOINT else '❌ Missing'}")
+        print(f"Azure Language Key: {'✅ Set' if cls.AZURE_LANGUAGE_KEY else '❌ Missing'}")
+        print(f"Gemini API Key: {'✅ Set' if cls.GEMINI_API_KEY else '❌ Missing'}")
+        
+        if cls.AZURE_DOC_INTELLIGENCE_KEY:
+            print(f"Azure Doc Key Preview: {cls.AZURE_DOC_INTELLIGENCE_KEY[:8]}...")
+        if cls.AZURE_LANGUAGE_KEY:
+            print(f"Azure Lang Key Preview: {cls.AZURE_LANGUAGE_KEY[:8]}...")
+        if cls.GEMINI_API_KEY:
+            print(f"Gemini Key Preview: {cls.GEMINI_API_KEY[:8]}...")
 
 # Create global config instance for easy access
 config = Config()
