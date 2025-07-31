@@ -12,7 +12,6 @@ from azure_document import azure_document_processor
 from azure_language import azure_language_processor
 from flashcards import gemini_generator
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FlashcardApp:
@@ -36,6 +35,28 @@ class FlashcardApp:
         <style>
         /* Clean, modern styling without bloat */
         .main > div { padding-top: 1rem; }
+        
+        /* MAIN PAGE ACCESS BUTTON - PROMINENT */
+        .main-access-button {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white !important;
+            padding: 2rem;
+            border-radius: 16px;
+            text-align: center;
+            margin: 2rem 0;
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+            border: 3px solid #34d399;
+        }
+        .main-access-button h2 { 
+            color: white !important; 
+            margin-bottom: 1rem; 
+            font-size: 1.8rem !important;
+        }
+        .main-access-button p { 
+            color: #d1fae5 !important; 
+            margin: 0; 
+            font-size: 1.1rem;
+        }
         
         /* Action buttons */
         .action-button {
@@ -152,8 +173,7 @@ class FlashcardApp:
         if 'study_settings' not in st.session_state:
             st.session_state.study_settings = {
                 'num_flashcards': 10,
-                'difficulty': 'Mixed (Recommended)',
-                'focus_mode': False
+                'difficulty': 'Mixed (Recommended)'
             }
         # Initialize flashcard study variables
         if 'current_card' not in st.session_state:
@@ -172,6 +192,9 @@ class FlashcardApp:
         st.markdown("# 🧠 Scribbly - AI Study Helper")
         st.markdown("Transform your notes into interactive flashcards with AI")
         
+        # MAIN PAGE ACCESS BUTTON - PROMINENT DISPLAY
+        self.render_main_access_button()
+        
         # Progress indicator
         self.render_progress_indicator()
         
@@ -185,8 +208,51 @@ class FlashcardApp:
         elif st.session_state.current_stage == 4:
             self.render_study_mode()
     
+    def render_main_access_button(self):
+        """MAIN PAGE BUTTON - Shows prominently when content is generated"""
+        
+        # Only show if content has been generated
+        if (st.session_state.processing_results and 
+            (st.session_state.flashcards or 
+             st.session_state.processing_results.get('language_result'))):
+            
+            generation_choice = st.session_state.get('generation_choice', 'complete_package')
+            
+            # Count what was generated
+            flashcard_count = len(st.session_state.flashcards)
+            language_result = st.session_state.processing_results.get('language_result', {})
+            summary_data = language_result.get('summary', {})
+            summary_count = len([k for k, v in summary_data.items() if v])
+            
+            # Create content description
+            if generation_choice == "flashcards_only":
+                content_desc = f"🃏 {flashcard_count} Interactive Flashcards"
+            elif generation_choice == "summary_only":
+                content_desc = f"📄 {summary_count} AI Summaries & Key Concepts"
+            else:
+                content_desc = f"🃏 {flashcard_count} Flashcards + 📄 {summary_count} AI Summaries"
+            
+            # PROMINENT ACCESS BUTTON
+            st.markdown(f"""
+            <div class="main-access-button">
+                <h2>🎉 Your AI Study Materials are Ready!</h2>
+                <p>{content_desc} generated and waiting for you</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Big access button
+            if st.button("🚀 ACCESS YOUR STUDY MATERIALS", 
+                        key="main_access_btn", 
+                        type="primary", 
+                        use_container_width=True):
+                st.session_state.current_stage = 4
+                st.session_state.view_mode = "summary" if generation_choice == "summary_only" else "browse"
+                st.rerun()
+            
+            st.markdown("---")
+    
     def render_sidebar(self):
-        """Simple sidebar with essential settings"""
+        """SIMPLIFIED sidebar - REMOVED FOCUS MODE"""
         with st.sidebar:
             st.markdown("## ⚙️ Study Settings")
             
@@ -200,7 +266,7 @@ class FlashcardApp:
             
             st.divider()
             
-            # Study configuration
+            # Study configuration - SIMPLIFIED
             st.markdown("### 📚 Configuration")
             
             st.session_state.study_settings['num_flashcards'] = st.slider(
@@ -214,11 +280,7 @@ class FlashcardApp:
                 index=0
             )
             
-            st.session_state.study_settings['focus_mode'] = st.checkbox(
-                "🎯 Focus Mode",
-                st.session_state.study_settings['focus_mode'],
-                help="Removes distractions during study"
-            )
+            # REMOVED FOCUS MODE BUTTON AS REQUESTED
             
             st.divider()
             
@@ -426,130 +488,40 @@ class FlashcardApp:
             logger.error(f"Processing error: {e}")
             st.error(f"❌ Processing failed: {str(e)}")
 
-    # FIXED: Properly indented as class method
     def show_results(self):
-        """Results display with clear navigation"""
+        """SIMPLIFIED results display - directs to main page button"""
         generation_choice = st.session_state.get('generation_choice', 'complete_package')
         
         st.success("✅ Generation completed!")
         
-        # Show what was created with enhanced cards
+        # Show summary of what was created
         if generation_choice == "flashcards_only":
             st.markdown(f"### 🎉 Generated {len(st.session_state.flashcards)} flashcards!")
-            
-            # Enhanced results cards
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>🃏 Browse Flashcards</h3>
-                    <p>Review all generated flashcards before studying</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("📖 Browse Flashcards", key="result_browse", use_container_width=True):
-                    st.session_state.view_mode = "browse"
-                    st.session_state.current_stage = 4
-                    st.rerun()
-            
-            with col2:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>🎯 Start Studying</h3>
-                    <p>Begin interactive flashcard study session</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("🎯 Start Studying", key="result_study", type="primary", use_container_width=True):
-                    st.session_state.view_mode = "study"
-                    st.session_state.current_stage = 4
-                    st.rerun()
+            st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to view your flashcards")
         
         elif generation_choice == "summary_only":
-            st.markdown("### 📄 AI Summary created!")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>📖 View AI Summary</h3>
-                    <p>Read comprehensive content summary</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("📖 View AI Summary", key="result_view_summary", type="primary", use_container_width=True):
-                    st.session_state.view_mode = "summary"
-                    st.session_state.current_stage = 4
-                    st.rerun()
-            
-            with col2:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>🔑 Key Concepts</h3>
-                    <p>Explore important concepts and terms</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("🔍 View Key Concepts", key="result_concepts", use_container_width=True):
-                    st.session_state.view_mode = "concepts"
-                    st.session_state.current_stage = 4
-                    st.rerun()
+            language_result = st.session_state.processing_results.get('language_result', {})
+            summary_data = language_result.get('summary', {})
+            summary_count = len([k for k, v in summary_data.items() if v])
+            st.markdown(f"### 📄 Generated {summary_count} AI summaries!")
+            st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to view your summaries")
         
         else:  # complete_package
-            st.markdown("### 🌟 Complete study package created!")
+            language_result = st.session_state.processing_results.get('language_result', {})
+            summary_data = language_result.get('summary', {})
+            summary_count = len([k for k, v in summary_data.items() if v])
             
-            # Show metrics - FIXED THE SUMMARY COUNT
+            st.markdown("### 🌟 Complete study package created!")
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("🃏 Flashcards", len(st.session_state.flashcards))
             with col2:
-                # Check what summaries we actually have
-                language_result = st.session_state.processing_results.get('language_result', {})
-                summary_data = language_result.get('summary', {})
-                available_summaries = len([k for k, v in summary_data.items() if v])
-                st.metric("📄 AI Summaries", f"{available_summaries} Types")
+                st.metric("📄 AI Summaries", f"{summary_count} Types")
             
-            # All access options clearly visible
-            st.markdown("### 🎯 What would you like to explore?")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>📖 AI Summary</h3>
-                    <p>Read comprehensive content analysis</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("📖 View AI Summary", key="complete_summary", use_container_width=True):
-                    st.session_state.view_mode = "summary"
-                    st.session_state.current_stage = 4
-                    st.rerun()
-            
-            with col2:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>🃏 Flashcards</h3>
-                    <p>Browse all generated flashcards</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("🃏 Browse Flashcards", key="complete_browse", use_container_width=True):
-                    st.session_state.view_mode = "browse"
-                    st.session_state.current_stage = 4
-                    st.rerun()
-            
-            with col3:
-                st.markdown("""
-                <div class="results-card">
-                    <h3>🎯 Study Mode</h3>
-                    <p>Start interactive study session</p>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button("🎯 Start Studying", key="complete_study", type="primary", use_container_width=True):
-                    st.session_state.view_mode = "study"
-                    st.session_state.current_stage = 4
-                    st.rerun()
+            st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to explore everything!")
         
-        # Add automatic navigation helper
+        # Simple navigation
         st.markdown("---")
-        st.info("💡 **Tip**: Use the buttons above to explore your generated content!")
-        
-        # Navigation options
         col1, col2 = st.columns(2)
         with col1:
             if st.button("⬅️ Generate Something Else", key="result_back", use_container_width=True):
@@ -561,7 +533,6 @@ class FlashcardApp:
             if st.button("🔄 Start Over", key="result_restart", use_container_width=True):
                 self.reset_session()
     
-    # FIXED: All methods properly indented as class methods
     def render_study_mode(self):
         """Enhanced study mode with proper navigation"""
         generation_choice = st.session_state.get('generation_choice', 'complete_package')
@@ -661,8 +632,8 @@ class FlashcardApp:
                 st.session_state.view_mode = "study"
                 st.rerun()
         with col2:
-            if st.button("⬅️ Back to Results", key="browser_back", use_container_width=True):
-                st.session_state.current_stage = 3
+            if st.button("⬅️ Back to Main", key="browser_back", use_container_width=True):
+                st.session_state.current_stage = 1
                 st.rerun()
     
     def render_summary_viewer(self):
@@ -758,8 +729,8 @@ class FlashcardApp:
                     st.rerun()
         
         with col3:
-            if st.button("⬅️ Back to Results", key="summary_back", use_container_width=True):
-                st.session_state.current_stage = 3
+            if st.button("⬅️ Back to Main", key="summary_back", use_container_width=True):
+                st.session_state.current_stage = 1
                 st.rerun()
     
     def render_concepts_viewer(self):
@@ -777,25 +748,11 @@ class FlashcardApp:
             st.markdown("### 🎯 Important Concepts Identified")
             st.markdown("*These concepts were automatically extracted using Azure AI Language Services*")
             
-            # Display concepts in categories if available
-            educational_concepts = language_result.get('key_phrases', {}).get('educational_concepts', {})
-            
-            if educational_concepts:
-                # Show categorized concepts
-                for category, concepts in educational_concepts.items():
-                    if concepts:
-                        st.markdown(f"#### {category.title()}")
-                        concepts_html = ""
-                        for concept in concepts:
-                            concepts_html += f'<span class="key-concept-tag">{concept}</span> '
-                        st.markdown(concepts_html, unsafe_allow_html=True)
-                        st.markdown("")
-            else:
-                # Show all concepts
-                concepts_html = ""
-                for phrase in key_phrases:
-                    concepts_html += f'<span class="key-concept-tag">{phrase}</span> '
-                st.markdown(concepts_html, unsafe_allow_html=True)
+            # Display concepts in a nicer format
+            concepts_html = ""
+            for phrase in key_phrases:
+                concepts_html += f'<span class="key-concept-tag">{phrase}</span> '
+            st.markdown(concepts_html, unsafe_allow_html=True)
         
         # Enhanced metrics
         st.markdown("### 📊 Content Analysis Metrics")
@@ -820,8 +777,8 @@ class FlashcardApp:
                 st.session_state.view_mode = "summary"
                 st.rerun()
         with col2:
-            if st.button("⬅️ Back to Results", key="concepts_back", use_container_width=True):
-                st.session_state.current_stage = 3
+            if st.button("⬅️ Back to Main", key="concepts_back", use_container_width=True):
+                st.session_state.current_stage = 1
                 st.rerun()
     
     def render_summary_study(self):
@@ -875,12 +832,10 @@ class FlashcardApp:
             
             col1, col2 = st.columns(2)
             with col1:
-                # FIXED: Changed key to avoid conflict with session state variable
                 if st.button("🔍 Show Answer", key="btn_show_answer", use_container_width=True):
                     st.session_state.show_answer = True
                     st.rerun()
             with col2:
-                # FIXED: Changed key to avoid conflict
                 if st.button("⏭️ Skip Card", key="btn_skip_card", use_container_width=True):
                     self.next_card()
         else:

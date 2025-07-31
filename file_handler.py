@@ -10,7 +10,6 @@ import io
 
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FileHandler:

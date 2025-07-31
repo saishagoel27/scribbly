@@ -8,7 +8,6 @@ from azure.core.exceptions import AzureError
 
 from config import Config
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AzureDocumentProcessor:
