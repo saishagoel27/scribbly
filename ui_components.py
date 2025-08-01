@@ -2,15 +2,20 @@ import streamlit as st
 import random
 from config import Config
 from file_handler import file_handler
+from session_keys import (
+    CURRENT_STAGE, PROCESSING_RESULTS, FLASHCARDS, STUDY_SETTINGS,
+    CURRENT_CARD, SHOW_ANSWER, STUDY_STATS, UPLOADED_FILE_DATA,
+    GENERATION_CHOICE, VIEW_MODE
+)
 
 def render_main_access_button(app):
-    if (st.session_state.processing_results and 
-        (st.session_state.flashcards or 
-         st.session_state.processing_results.get('language_result'))):
+    if (st.session_state[PROCESSING_RESULTS] and 
+        (st.session_state[FLASHCARDS] or 
+         st.session_state[PROCESSING_RESULTS].get('language_result'))):
 
-        generation_choice = st.session_state.get('generation_choice', 'complete_package')
-        flashcard_count = len(st.session_state.flashcards)
-        language_result = st.session_state.processing_results.get('language_result', {})
+        generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
+        flashcard_count = len(st.session_state[FLASHCARDS])
+        language_result = st.session_state[PROCESSING_RESULTS].get('language_result', {})
         summary_data = language_result.get('summary', {})
         summary_count = len([k for k, v in summary_data.items() if v])
 
@@ -32,8 +37,8 @@ def render_main_access_button(app):
                     key="main_access_btn", 
                     type="primary", 
                     use_container_width=True):
-            st.session_state.current_stage = 4
-            st.session_state.view_mode = "summary" if generation_choice == "summary_only" else "browse"
+            st.session_state[CURRENT_STAGE] = 4
+            st.session_state[VIEW_MODE] = "summary" if generation_choice == "summary_only" else "browse"
             st.rerun()
         st.markdown("---")
 
@@ -48,11 +53,11 @@ def render_sidebar(app):
             st.markdown(f"{emoji} {name}")
         st.divider()
         st.markdown("### 📚 Configuration")
-        st.session_state.study_settings['num_flashcards'] = st.slider(
+        st.session_state[STUDY_SETTINGS]['num_flashcards'] = st.slider(
             "Number of Flashcards", 5, 20, 
-            st.session_state.study_settings['num_flashcards']
+            st.session_state[STUDY_SETTINGS]['num_flashcards']
         )
-        st.session_state.study_settings['difficulty'] = st.selectbox(
+        st.session_state[STUDY_SETTINGS]['difficulty'] = st.selectbox(
             "Difficulty Focus",
             ["Mixed (Recommended)", "Basic Concepts", "Advanced Topics", "Application-Based"],
             index=0
@@ -63,7 +68,7 @@ def render_sidebar(app):
 
 def render_progress_indicator(app):
     steps = ["📁 Upload", "🎯 Choose", "🔍 Process", "📚 Study"]
-    current = st.session_state.current_stage
+    current = st.session_state[CURRENT_STAGE]
     st.progress(current / len(steps))
     cols = st.columns(len(steps))
     for i, (col, step) in enumerate(zip(cols, steps)):
@@ -80,7 +85,7 @@ def render_upload_stage(app):
     st.markdown("Upload PDFs, images, or documents to create flashcards")
     uploaded_file_data = file_handler.create_upload_interface()
     if uploaded_file_data and not uploaded_file_data.get('error'):
-        st.session_state.uploaded_file_data = uploaded_file_data
+        st.session_state[UPLOADED_FILE_DATA] = uploaded_file_data
         st.success("✅ File uploaded successfully!")
         metadata = uploaded_file_data.get('metadata', {})
         col1, col2, col3 = st.columns(3)
@@ -91,15 +96,15 @@ def render_upload_stage(app):
         with col3:
             st.metric("📋 Pages", metadata.get('estimated_pages', 1))
         if st.button("➡️ Choose What to Generate", key="upload_next", type="primary", use_container_width=True):
-            st.session_state.current_stage = 2
+            st.session_state[CURRENT_STAGE] = 2
             st.rerun()
     elif uploaded_file_data and uploaded_file_data.get('error'):
         st.error(f"❌ {uploaded_file_data['error']}")
 
 def render_generation_options(app):
     st.header("🎯 Choose What to Generate")
-    if 'uploaded_file_data' in st.session_state:
-        metadata = st.session_state.uploaded_file_data.get('metadata', {})
+    if UPLOADED_FILE_DATA in st.session_state:
+        metadata = st.session_state[UPLOADED_FILE_DATA].get('metadata', {})
         st.info(f"📄 Ready to process: **{metadata.get('filename', 'Your file')}**")
     col1, col2 = st.columns(2)
     with col1:
@@ -110,8 +115,8 @@ def render_generation_options(app):
         </div>
         """, unsafe_allow_html=True)
         if st.button("🚀 Generate Flashcards Only", key="gen_flashcards", use_container_width=True, type="primary"):
-            st.session_state.generation_choice = "flashcards_only"
-            st.session_state.current_stage = 3
+            st.session_state[GENERATION_CHOICE] = "flashcards_only"
+            st.session_state[CURRENT_STAGE] = 3
             st.rerun()
     with col2:
         st.markdown("""
@@ -121,8 +126,8 @@ def render_generation_options(app):
         </div>
         """, unsafe_allow_html=True)
         if st.button("📝 Generate Summary Only", key="gen_summary", use_container_width=True):
-            st.session_state.generation_choice = "summary_only"
-            st.session_state.current_stage = 3
+            st.session_state[GENERATION_CHOICE] = "summary_only"
+            st.session_state[CURRENT_STAGE] = 3
             st.rerun()
     st.markdown("### 🌟 Recommended")
     st.markdown("""
@@ -132,48 +137,48 @@ def render_generation_options(app):
     </div>
     """, unsafe_allow_html=True)
     if st.button("🚀 Generate Everything", key="gen_complete", use_container_width=True, type="primary"):
-        st.session_state.generation_choice = "complete_package"
-        st.session_state.current_stage = 3
+        st.session_state[GENERATION_CHOICE] = "complete_package"
+        st.session_state[CURRENT_STAGE] = 3
         st.rerun()
     col1, col2 = st.columns(2)
     with col1:
         if st.button("⬅️ Back to Upload", key="gen_back", use_container_width=True):
-            st.session_state.current_stage = 1
+            st.session_state[CURRENT_STAGE] = 1
             st.rerun()
 
 def render_processing_stage(app):
-    generation_choice = st.session_state.get('generation_choice', 'complete_package')
+    generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
     if generation_choice == "flashcards_only":
         st.header("🃏 Generating Flashcards")
     elif generation_choice == "summary_only":
         st.header("📄 Creating Summary")
     else:
         st.header("🔍 Creating Study Package")
-    if not st.session_state.processing_results:
+    if not st.session_state[PROCESSING_RESULTS]:
         app.execute_processing()
     else:
         app.show_results()
 
 def show_results(app):
-    generation_choice = st.session_state.get('generation_choice', 'complete_package')
+    generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
     st.success("✅ Generation completed!")
     if generation_choice == "flashcards_only":
-        st.markdown(f"### 🎉 Generated {len(st.session_state.flashcards)} flashcards!")
+        st.markdown(f"### 🎉 Generated {len(st.session_state[FLASHCARDS])} flashcards!")
         st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to view your flashcards")
     elif generation_choice == "summary_only":
-        language_result = st.session_state.processing_results.get('language_result', {})
+        language_result = st.session_state[PROCESSING_RESULTS].get('language_result', {})
         summary_data = language_result.get('summary', {})
         summary_count = len([k for k, v in summary_data.items() if v])
         st.markdown(f"### 📄 Generated {summary_count} AI summaries!")
         st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to view your summaries")
     else:
-        language_result = st.session_state.processing_results.get('language_result', {})
+        language_result = st.session_state[PROCESSING_RESULTS].get('language_result', {})
         summary_data = language_result.get('summary', {})
         summary_count = len([k for k, v in summary_data.items() if v])
         st.markdown("### 🌟 Complete study package created!")
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("🃏 Flashcards", len(st.session_state.flashcards))
+            st.metric("🃏 Flashcards", len(st.session_state[FLASHCARDS]))
         with col2:
             st.metric("📄 AI Summaries", f"{summary_count} Types")
         st.info("👆 Use the **ACCESS YOUR STUDY MATERIALS** button above to explore everything!")
@@ -181,17 +186,17 @@ def show_results(app):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("⬅️ Generate Something Else", key="result_back", use_container_width=True):
-            st.session_state.processing_results = {}
-            st.session_state.flashcards = []
-            st.session_state.current_stage = 2
+            st.session_state[PROCESSING_RESULTS] = {}
+            st.session_state[FLASHCARDS] = []
+            st.session_state[CURRENT_STAGE] = 2
             st.rerun()
     with col2:
         if st.button("🔄 Start Over", key="result_restart", use_container_width=True):
             app.reset_session()
 
 def render_study_mode(app):
-    generation_choice = st.session_state.get('generation_choice', 'complete_package')
-    view_mode = st.session_state.get('view_mode', 'study')
+    generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
+    view_mode = st.session_state.get(VIEW_MODE, 'study')
     app.render_navigation_bar()
     if view_mode == "browse":
         app.render_flashcard_browser()
@@ -206,7 +211,7 @@ def render_study_mode(app):
             app.render_flashcard_study()
 
 def render_navigation_bar(app):
-    generation_choice = st.session_state.get('generation_choice', 'complete_package')
+    generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
     st.markdown("""
     <div class="nav-bar">
         <h4 style="margin: 0; color: #1e293b;">🧭 Navigation</h4>
@@ -229,17 +234,17 @@ def render_navigation_bar(app):
         for i, (label, mode) in enumerate(nav_options):
             with cols[i]:
                 if st.button(label, key=f"nav_{mode}", use_container_width=True):
-                    st.session_state.view_mode = mode
+                    st.session_state[VIEW_MODE] = mode
                     st.rerun()
     st.markdown("---")
 
 def render_flashcard_browser(app):
     st.header("🃏 Browse Your Flashcards")
-    if not st.session_state.flashcards:
+    if not st.session_state[FLASHCARDS]:
         st.warning("No flashcards available")
         return
-    st.info(f"📊 **{len(st.session_state.flashcards)} flashcards** generated from your content")
-    for i, card in enumerate(st.session_state.flashcards, 1):
+    st.info(f"📊 **{len(st.session_state[FLASHCARDS])} flashcards** generated from your content")
+    for i, card in enumerate(st.session_state[FLASHCARDS], 1):
         with st.expander(f"📚 Flashcard {i} - {card.get('concept', 'General')} ({card.get('difficulty', 'medium').title()})"):
             col1, col2 = st.columns(2)
             with col1:
@@ -260,19 +265,19 @@ def render_flashcard_browser(app):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🎯 Start Studying Now", key="browser_study", type="primary", use_container_width=True):
-            st.session_state.view_mode = "study"
+            st.session_state[VIEW_MODE] = "study"
             st.rerun()
     with col2:
         if st.button("⬅️ Back to Main", key="browser_back", use_container_width=True):
-            st.session_state.current_stage = 1
+            st.session_state[CURRENT_STAGE] = 1
             st.rerun()
 
 def render_summary_viewer(app):
     st.header("📄 AI-Generated Summary")
-    if 'language_result' not in st.session_state.processing_results:
+    if 'language_result' not in st.session_state[PROCESSING_RESULTS]:
         st.warning("No summary available")
         return
-    language_result = st.session_state.processing_results['language_result']
+    language_result = st.session_state[PROCESSING_RESULTS]['language_result']
     summary_data = language_result.get('summary', {})
     if summary_data:
         st.markdown("### 🎯 Choose Your Summary Style")
@@ -323,27 +328,27 @@ def render_summary_viewer(app):
     st.markdown("### 🚀 What's Next?")
     col1, col2, col3 = st.columns(3)
     with col1:
-        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
         if generation_choice in ["flashcards_only", "complete_package"]:
             if st.button("🃏 View Flashcards", key="summary_flashcards", use_container_width=True):
-                st.session_state.view_mode = "browse"
+                st.session_state[VIEW_MODE] = "browse"
                 st.rerun()
     with col2:
         if generation_choice in ["flashcards_only", "complete_package"]:
             if st.button("🎯 Start Studying", key="summary_study", type="primary", use_container_width=True):
-                st.session_state.view_mode = "study"
+                st.session_state[VIEW_MODE] = "study"
                 st.rerun()
     with col3:
         if st.button("⬅️ Back to Main", key="summary_back", use_container_width=True):
-            st.session_state.current_stage = 1
+            st.session_state[CURRENT_STAGE] = 1
             st.rerun()
 
 def render_concepts_viewer(app):
     st.header("🔑 Key Concepts Analysis")
-    if 'language_result' not in st.session_state.processing_results:
+    if 'language_result' not in st.session_state[PROCESSING_RESULTS]:
         st.warning("No concept analysis available")
         return
-    language_result = st.session_state.processing_results['language_result']
+    language_result = st.session_state[PROCESSING_RESULTS]['language_result']
     key_phrases = language_result.get('key_phrases', {}).get('azure_key_phrases', [])
     if key_phrases:
         st.markdown("### 🎯 Important Concepts Identified")
@@ -366,38 +371,38 @@ def render_concepts_viewer(app):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📖 View Full Summary", key="concepts_summary", type="primary", use_container_width=True):
-            st.session_state.view_mode = "summary"
+            st.session_state[VIEW_MODE] = "summary"
             st.rerun()
     with col2:
         if st.button("⬅️ Back to Main", key="concepts_back", use_container_width=True):
-            st.session_state.current_stage = 1
+            st.session_state[CURRENT_STAGE] = 1
             st.rerun()
 
 def render_summary_study(app):
     st.header("📄 Study Your AI Summary")
-    if 'language_result' not in st.session_state.processing_results:
+    if 'language_result' not in st.session_state[PROCESSING_RESULTS]:
         st.warning("No summary available")
         return
     app.render_summary_viewer()
 
 def render_flashcard_study(app):
     st.header("🃏 Interactive Flashcard Study")
-    if not st.session_state.flashcards:
+    if not st.session_state[FLASHCARDS]:
         st.warning("No flashcards available")
         return
-    total_cards = len(st.session_state.flashcards)
-    current_idx = st.session_state.current_card
-    current_card = st.session_state.flashcards[current_idx]
+    total_cards = len(st.session_state[FLASHCARDS])
+    current_idx = st.session_state[CURRENT_CARD]
+    current_card = st.session_state[FLASHCARDS][current_idx]
     progress = (current_idx + 1) / total_cards
     st.progress(progress)
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"**📊 Progress: {current_idx + 1} of {total_cards} cards**")
     with col2:
-        if st.session_state.study_stats['total'] > 0:
-            accuracy = (st.session_state.study_stats['correct'] / st.session_state.study_stats['total']) * 100
+        if st.session_state[STUDY_STATS]['total'] > 0:
+            accuracy = (st.session_state[STUDY_STATS]['correct'] / st.session_state[STUDY_STATS]['total']) * 100
             st.markdown(f"**🎯 Accuracy: {accuracy:.1f}%**")
-    if not st.session_state.show_answer:
+    if not st.session_state[SHOW_ANSWER]:
         st.markdown(f"""
         <div class="flashcard">
             <h3>🤔 Question {current_idx + 1}</h3>
@@ -411,7 +416,7 @@ def render_flashcard_study(app):
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔍 Show Answer", key="btn_show_answer", use_container_width=True):
-                st.session_state.show_answer = True
+                st.session_state[SHOW_ANSWER] = True
                 st.rerun()
         with col2:
             if st.button("⏭️ Skip Card", key="btn_skip_card", use_container_width=True):
@@ -448,22 +453,22 @@ def render_flashcard_study(app):
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("🔄 Restart", key="btn_restart_study", use_container_width=True):
-            st.session_state.current_card = 0
-            st.session_state.show_answer = False
-            st.session_state.study_stats = {'correct': 0, 'incorrect': 0, 'total': 0}
+            st.session_state[CURRENT_CARD] = 0
+            st.session_state[SHOW_ANSWER] = False
+            st.session_state[STUDY_STATS] = {'correct': 0, 'incorrect': 0, 'total': 0}
             st.rerun()
     with col2:
         if st.button("🎲 Shuffle", key="btn_shuffle_cards", use_container_width=True):
-            random.shuffle(st.session_state.flashcards)
-            st.session_state.current_card = 0
-            st.session_state.show_answer = False
+            random.shuffle(st.session_state[FLASHCARDS])
+            st.session_state[CURRENT_CARD] = 0
+            st.session_state[SHOW_ANSWER] = False
             st.rerun()
     with col3:
         if st.button("📊 View Stats", key="btn_view_stats", use_container_width=True):
             app.show_detailed_stats()
     with col4:
-        generation_choice = st.session_state.get('generation_choice', 'complete_package')
+        generation_choice = st.session_state.get(GENERATION_CHOICE, 'complete_package')
         if generation_choice in ["summary_only", "complete_package"]:
             if st.button("📖 View Summary", key="btn_study_to_summary", use_container_width=True):
-                st.session_state.view_mode = "summary"
+                st.session_state[VIEW_MODE] = "summary"
                 st.rerun()
