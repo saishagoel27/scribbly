@@ -4,6 +4,7 @@ import time
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.textanalytics import TextAnalyticsClient
 from config import Config
+from fallbacks import simple_key_extraction, simple_extractive_summary
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class AzureLanguageProcessor:
     def _extract_key_phrases(self, text: str) -> List[str]:
         """Extract key phrases from text"""
         if not self.client:
-            return self._simple_key_extraction(text)
+            return simple_key_extraction(text)
         
         try:
             # Split text into chunks if too long
@@ -73,7 +74,7 @@ class AzureLanguageProcessor:
             
         except Exception as e:
             logger.error(f"Key phrase extraction failed: {e}")
-            return self._simple_key_extraction(text)
+            return simple_key_extraction(text)
     
     def _create_study_summaries(self, text: str, key_phrases: List[str]) -> Dict[str, str]:
         """Create different types of summaries for studying"""
@@ -96,7 +97,7 @@ class AzureLanguageProcessor:
     def _get_extractive_summary(self, text: str) -> str:
         """Get key sentences using Azure (or fallback)"""
         if not self.client:
-            return self._simple_extractive_summary(text)
+            return simple_extractive_summary(text)
         
         try:
             # Try Azure extractive summarization
@@ -110,11 +111,11 @@ class AzureLanguageProcessor:
                     summary_sentences = [sentence.text for sentence in result[0].sentences]
                     summaries.extend(summary_sentences)
             
-            return " ".join(summaries) if summaries else self._simple_extractive_summary(text)
+            return " ".join(summaries) if summaries else simple_extractive_summary(text)
             
         except Exception as e:
             logger.error(f"Azure extractive summary failed: {e}")
-            return self._simple_extractive_summary(text)
+            return simple_extractive_summary(text)
     
     def _create_smart_summary(self, text: str, key_phrases: List[str]) -> str:
         """Create an intelligent summary focusing on key concepts"""
@@ -144,7 +145,7 @@ class AzureLanguageProcessor:
             summary += f". This content covers key topics including: {', '.join(key_phrases[:5])}."
             return summary
         else:
-            return self._simple_extractive_summary(text)
+            return simple_extractive_summary(text)
     
     def _create_study_focused_summary(self, text: str, key_phrases: List[str]) -> str:
         """Create a summary focused on study/learning"""
@@ -172,35 +173,6 @@ class AzureLanguageProcessor:
             return summary
         else:
             return f"Main topics covered: {', '.join(key_phrases[:5])}. Review the full content for detailed understanding."
-    
-    def _simple_extractive_summary(self, text: str) -> str:
-        """Simple fallback summary"""
-        sentences = text.split('.')
-        # Get first few and last few sentences
-        if len(sentences) > 6:
-            summary_sentences = sentences[:3] + sentences[-2:]
-        else:
-            summary_sentences = sentences[:min(4, len(sentences))]
-        
-        return ". ".join([s.strip() for s in summary_sentences if len(s.strip()) > 10])
-    
-    def _simple_key_extraction(self, text: str) -> List[str]:
-        """Simple keyword extraction fallback"""
-        # Basic approach - find frequently mentioned words
-        words = text.lower().split()
-        
-        # Filter out common words
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those'}
-        
-        word_freq = {}
-        for word in words:
-            word = word.strip('.,!?;:"()[]').lower()
-            if len(word) > 3 and word not in stop_words:
-                word_freq[word] = word_freq.get(word, 0) + 1
-        
-        # Get top words
-        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
-        return [word[0] for word in sorted_words[:15]]
     
     def _split_text(self, text: str, max_length: int = 5000) -> List[str]:
         """Split text into chunks"""
@@ -239,10 +211,10 @@ class AzureLanguageProcessor:
     
     def _create_fallback_analysis(self, text: str) -> Dict[str, Any]:
         """Fallback when Azure fails"""
-        key_phrases = self._simple_key_extraction(text)
+        key_phrases = simple_key_extraction(text)
         summaries = {
-            'best': self._simple_extractive_summary(text),
-            'extractive': self._simple_extractive_summary(text),
+            'best': simple_extractive_summary(text),
+            'extractive': simple_extractive_summary(text),
             'abstractive': f"Summary of content covering: {', '.join(key_phrases[:5])}"
         }
         
