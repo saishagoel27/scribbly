@@ -8,6 +8,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 from config import Config
+from fallbacks import create_basic_flashcards  
 
 logger = logging.getLogger(__name__)
 
@@ -111,44 +112,32 @@ class GeminiFlashcardGenerator:
     
     def _clean_text_for_processing(self, text: str) -> str:
         """Simple text cleaning for flashcard generation"""
-        # Remove excessive whitespace and clean formatting
         cleaned = re.sub(r'\s+', ' ', text)
         cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
         cleaned = cleaned.strip()
-        
-        # Limit text length for Gemini (keep most important parts)
         max_words = 1000
         words = cleaned.split()
         if len(words) > max_words:
-            # Take first 70% and last 30% to preserve context
             first_part = words[:int(max_words * 0.7)]
             last_part = words[-int(max_words * 0.3):]
             cleaned = ' '.join(first_part + ['...'] + last_part)
-        
         return cleaned
     
     def _create_flashcard_prompt(self, text: str, params: Dict) -> str:
         """Create effective prompt for Gemini AI"""
-        
         num_cards = params.get('num_flashcards', 10)
         difficulty = params.get('difficulty_focus', 'Mixed (Recommended)')
         key_phrases = params.get('key_phrases', [])
-        
-        # Map difficulty to instruction
         difficulty_instructions = {
             'Basic Concepts': 'Focus on fundamental concepts and definitions. Keep questions simple and clear.',
             'Advanced Topics': 'Create challenging questions that test deep understanding and application.',
             'Application-Based': 'Focus on practical applications and real-world scenarios.',
             'Mixed (Recommended)': 'Mix basic concepts, intermediate understanding, and some application questions.'
         }
-        
         difficulty_instruction = difficulty_instructions.get(difficulty, difficulty_instructions['Mixed (Recommended)'])
-        
-        # Include key phrases if available
         key_phrases_text = ""
         if key_phrases:
             key_phrases_text = f"\n\nKey concepts to focus on: {', '.join(key_phrases[:10])}"
-        
         prompt = f"""
 You are an expert educational content creator. Create {num_cards} high-quality flashcards from the following study material.
 
@@ -179,64 +168,46 @@ Return the flashcards in this EXACT JSON format:
 
 Generate exactly {num_cards} flashcards now:
 """
-        
         return prompt
     
     def _parse_flashcard_response(self, response_text: str) -> List[Dict]:
         """Parse Gemini response into flashcard list"""
         try:
-            # Clean the response text
             cleaned_response = response_text.strip()
-            
-            # Remove markdown code blocks if present
             if '```json' in cleaned_response:
                 cleaned_response = re.sub(r'```json\s*', '', cleaned_response)
                 cleaned_response = re.sub(r'```\s*$', '', cleaned_response)
             elif '```' in cleaned_response:
                 cleaned_response = re.sub(r'```\s*', '', cleaned_response)
-            
-            # Try to find JSON in the response
             json_match = re.search(r'\{.*\}', cleaned_response, re.DOTALL)
             if json_match:
                 json_text = json_match.group()
             else:
                 json_text = cleaned_response
-            
-            # Parse JSON
             parsed_data = json.loads(json_text)
-            
-            # Extract flashcards
             if isinstance(parsed_data, dict):
                 flashcards = parsed_data.get('flashcards', [])
             elif isinstance(parsed_data, list):
                 flashcards = parsed_data
             else:
                 return []
-            
-            # Validate and clean flashcards
             valid_flashcards = []
             for card in flashcards:
                 if isinstance(card, dict) and 'question' in card and 'answer' in card:
-                    # Clean and validate required fields
                     cleaned_card = {
                         'question': str(card.get('question', '')).strip(),
                         'answer': str(card.get('answer', '')).strip(),
                         'concept': str(card.get('concept', 'General')).strip(),
                         'difficulty': str(card.get('difficulty', 'intermediate')).strip().lower()
                     }
-                    
-                    # Only include cards with meaningful content
                     if (len(cleaned_card['question']) > 10 and 
                         len(cleaned_card['answer']) > 10):
                         valid_flashcards.append(cleaned_card)
-            
             logger.info(f"Successfully parsed {len(valid_flashcards)} flashcards")
             return valid_flashcards
-            
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
             return self._extract_flashcards_from_text(response_text)
-        
         except Exception as e:
             logger.error(f"Flashcard parsing error: {e}")
             return self._extract_flashcards_from_text(response_text)
@@ -245,15 +216,11 @@ Generate exactly {num_cards} flashcards now:
         """Fallback: extract flashcards from unstructured text"""
         try:
             flashcards = []
-            
-            # Look for Q: and A: patterns
             qa_pattern = r'(?:Q:|Question:|question:)\s*(.+?)(?:A:|Answer:|answer:)\s*(.+?)(?=(?:Q:|Question:|question:)|$)'
             matches = re.findall(qa_pattern, response_text, re.DOTALL | re.IGNORECASE)
-            
             for i, (question, answer) in enumerate(matches):
                 question = question.strip().replace('\n', ' ')
                 answer = answer.strip().replace('\n', ' ')
-                
                 if len(question) > 10 and len(answer) > 10:
                     flashcards.append({
                         'question': question,
@@ -261,13 +228,10 @@ Generate exactly {num_cards} flashcards now:
                         'concept': f'Concept {i+1}',
                         'difficulty': 'intermediate'
                     })
-            
             if len(flashcards) >= 3:
                 logger.info(f"Extracted {len(flashcards)} flashcards from text fallback")
                 return flashcards
-            
             return []
-            
         except Exception as e:
             logger.error(f"Text extraction fallback error: {e}")
             return []
@@ -275,70 +239,8 @@ Generate exactly {num_cards} flashcards now:
     def _create_fallback_flashcards(self, text: str, params: Dict) -> Dict:
         """Create simple flashcards when Gemini is unavailable"""
         try:
-            num_cards = min(params.get('num_flashcards', 10), 8)  # Limit for fallback
-            
-            # Split text into sentences
-            sentences = re.split(r'[.!?]+', text)
-            sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
-            
-            fallback_flashcards = []
-            
-            # Create simple definition-style flashcards
-            for i, sentence in enumerate(sentences[:num_cards]):
-                # Extract potential key terms (simple heuristic)
-                words = sentence.split()
-                
-                # Look for capitalized words or phrases that might be important
-                key_terms = [word for word in words if word[0].isupper() and len(word) > 3]
-                
-                if key_terms:
-                    term = key_terms[0]
-                    question = f"What is {term}?"
-                    answer = sentence.strip()
-                else:
-                    # Create a fill-in-the-blank style question
-                    if len(words) > 8:
-                        # Remove a key word from the middle
-                        blank_index = len(words) // 2
-                        blank_word = words[blank_index]
-                        question_words = words.copy()
-                        question_words[blank_index] = "______"
-                        question = f"Fill in the blank: {' '.join(question_words)}"
-                        answer = f"The missing word is: {blank_word}. Complete sentence: {sentence}"
-                    else:
-                        question = f"Explain this concept: {sentence[:50]}..."
-                        answer = sentence.strip()
-                
-                fallback_flashcards.append({
-                    'question': question,
-                    'answer': answer,
-                    'concept': f'Concept {i+1}',
-                    'difficulty': 'basic'
-                })
-            
-            if not fallback_flashcards:
-                # Ultimate fallback - create basic questions
-                fallback_flashcards = [
-                    {
-                        'question': 'What is the main topic of this material?',
-                        'answer': text[:200] + "..." if len(text) > 200 else text,
-                        'concept': 'Main Topic',
-                        'difficulty': 'basic'
-                    }
-                ]
-            
-            return {
-                "flashcards": fallback_flashcards,
-                "generation_metadata": {
-                    "total_generated": len(fallback_flashcards),
-                    "method": "fallback_generation",
-                    "quality_score": 0.6,
-                    "timestamp": datetime.now().isoformat()
-                },
-                "success": True,
-                "fallback_used": True
-            }
-            
+            num_cards = min(params.get('num_flashcards', 10), 8)
+            return create_basic_flashcards(text, num_cards)
         except Exception as e:
             logger.error(f"Fallback flashcard creation error: {e}")
             return {
