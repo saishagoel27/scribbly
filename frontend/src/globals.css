@@ -464,7 +464,7 @@ body {
   }
 }
 
-/* === ENHANCED FOOTER === */
+/* ENHANCED FOOTER */
 .app-footer {
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-primary);
