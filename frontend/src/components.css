@@ -600,7 +600,7 @@
   }
 }
 
-/* === PROCESSING PREVIEW === */
+/* PROCESSING PREVIEW */
 .processing-preview {
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
