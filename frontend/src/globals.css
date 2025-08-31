@@ -138,7 +138,7 @@ body {
   position: relative;
 }
 
-/* === ANIMATED HEADER === */
+/* ANIMATED HEADER */
 .app-header {
   background: rgba(10, 10, 10, 0.95);
   backdrop-filter: blur(20px);
