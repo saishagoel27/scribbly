@@ -505,7 +505,7 @@ body {
   transform: translateY(-1px);
 }
 
-/* === PROCESSING OVERLAY === */
+/* PROCESSING OVERLAY */
 .processing-overlay {
   position: fixed;
   top: 0;
