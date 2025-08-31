@@ -215,7 +215,7 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* === ANIMATED PROGRESS STEPS === */
+/* ANIMATED PROGRESS STEPS */
 .progress-steps {
   display: flex;
   align-items: center;
