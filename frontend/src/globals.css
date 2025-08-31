@@ -743,7 +743,7 @@ body {
   border: 0;
 }
 
-/* === FOCUS STATES === */
+/* FOCUS STATES */
 .btn:focus-visible,
 .step:focus-visible,
 .footer-link:focus-visible {
