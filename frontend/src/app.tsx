@@ -7,6 +7,7 @@ import './styles/components.css';
 import UploadPage from '../pages/UploadPage';
 import ConfigurePage from '../pages/ConfigurePage'; 
 import ProcessingPage from '../pages/ProcessingPage';
+import StudyPage from '../pages/StudyPage';
 
 // Types
 interface FileData {
