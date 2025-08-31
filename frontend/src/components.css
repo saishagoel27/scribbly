@@ -1138,7 +1138,7 @@
   animation: slideInUp 0.8s ease-out 0.6s both;
 }
 
-/* === RESPONSIVE DESIGN FOR COMPONENTS === */
+/* RESPONSIVE DESIGN FOR COMPONENTS */
 @media (max-width: 768px) {
   .configure-page {
     gap: var(--space-8);
