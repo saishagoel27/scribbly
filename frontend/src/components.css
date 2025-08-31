@@ -373,7 +373,7 @@
   color: var(--text-primary);
 }
 
-/* === ERROR MESSAGES === */
+/* ERROR MESSAGES */
 .error-message {
   display: flex;
   align-items: flex-start;
