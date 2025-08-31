@@ -60,7 +60,7 @@ class AzureLanguageProcessor:
         
         try:
             # Split text into chunks if too long
-            chunks = self._split_text(text, 5000)
+            chunks = self._split_text(text, Config.AZURE_KEY_PHRASE_CHUNK_SIZE if hasattr(Config, "AZURE_KEY_PHRASE_CHUNK_SIZE") else 5000)
             all_phrases = []
             
             for chunk in chunks:
@@ -70,7 +70,7 @@ class AzureLanguageProcessor:
             
             # Remove duplicates and return top phrases
             unique_phrases = list(set(all_phrases))
-            return unique_phrases[:20]
+            return unique_phrases[:Config.MAX_KEY_PHRASES if hasattr(Config, "MAX_KEY_PHRASES") else 20]
             
         except Exception as e:
             logger.error(f"Key phrase extraction failed: {e}")
@@ -101,12 +101,12 @@ class AzureLanguageProcessor:
         
         try:
             # Try Azure extractive summarization
-            chunks = self._split_text(text, 3000)
+            chunks = self._split_text(text, Config.AZURE_SUMMARY_CHUNK_SIZE if hasattr(Config, "AZURE_SUMMARY_CHUNK_SIZE") else 3000)
             summaries = []
             
             for chunk in chunks:
                 # Use Azure's summarization if available
-                result = self.client.extract_summary([chunk], max_sentence_count=3)
+                result = self.client.extract_summary([chunk], max_sentence_count=Config.AZURE_MAX_SUMMARY_SENTENCES if hasattr(Config, "AZURE_MAX_SUMMARY_SENTENCES") else 3)
                 if result and not result[0].is_error:
                     summary_sentences = [sentence.text for sentence in result[0].sentences]
                     summaries.extend(summary_sentences)
@@ -128,7 +128,7 @@ class AzureLanguageProcessor:
             score = 0
             sentence_lower = sentence.lower()
             
-            for phrase in key_phrases[:10]:  # Use top 10 key phrases
+            for phrase in key_phrases[:Config.MAX_KEY_PHRASES if hasattr(Config, "MAX_KEY_PHRASES") else 10]:
                 if phrase.lower() in sentence_lower:
                     score += 1
             
@@ -137,12 +137,12 @@ class AzureLanguageProcessor:
         
         # Sort by score and get top sentences
         important_sentences.sort(key=lambda x: x[1], reverse=True)
-        top_sentences = [sent[0] for sent in important_sentences[:5]]
+        top_sentences = [sent[0] for sent in important_sentences[:Config.AZURE_SMART_SUMMARY_SENTENCES if hasattr(Config, "AZURE_SMART_SUMMARY_SENTENCES") else 5]]
         
         if top_sentences:
             summary = ". ".join(top_sentences)
             # Add conclusion
-            summary += f". This content covers key topics including: {', '.join(key_phrases[:5])}."
+            summary += f". This content covers key topics including: {', '.join(key_phrases[:Config.AZURE_SMART_SUMMARY_TOPICS if hasattr(Config, 'AZURE_SMART_SUMMARY_TOPICS') else 5])}."
             return summary
         else:
             return simple_extractive_summary(text)
@@ -161,18 +161,18 @@ class AzureLanguageProcessor:
             
             # Check if sentence has learning indicators or key phrases
             has_learning = any(word in sentence_lower for word in learning_words)
-            has_key_phrase = any(phrase.lower() in sentence_lower for phrase in key_phrases[:5])
+            has_key_phrase = any(phrase.lower() in sentence_lower for phrase in key_phrases[:Config.AZURE_STUDY_SUMMARY_KEY_PHRASES if hasattr(Config, "AZURE_STUDY_SUMMARY_KEY_PHRASES") else 5])
             
             if (has_learning or has_key_phrase) and len(sentence.strip()) > 15:
                 study_sentences.append(sentence.strip())
         
         if study_sentences:
             # Take top sentences and format for study
-            summary = ". ".join(study_sentences[:4])
-            summary += f" Key areas to focus on: {', '.join(key_phrases[:3])}."
+            summary = ". ".join(study_sentences[:Config.AZURE_STUDY_SUMMARY_SENTENCES if hasattr(Config, "AZURE_STUDY_SUMMARY_SENTENCES") else 4])
+            summary += f" Key areas to focus on: {', '.join(key_phrases[:Config.AZURE_STUDY_SUMMARY_TOPICS if hasattr(Config, 'AZURE_STUDY_SUMMARY_TOPICS') else 3])}."
             return summary
         else:
-            return f"Main topics covered: {', '.join(key_phrases[:5])}. Review the full content for detailed understanding."
+            return f"Main topics covered: {', '.join(key_phrases[:Config.AZURE_STUDY_SUMMARY_TOPICS if hasattr(Config, 'AZURE_STUDY_SUMMARY_TOPICS') else 5])}. Review the full content for detailed understanding."
     
     def _split_text(self, text: str, max_length: int = 5000) -> List[str]:
         """Split text into chunks"""
@@ -215,7 +215,7 @@ class AzureLanguageProcessor:
         summaries = {
             'best': simple_extractive_summary(text),
             'extractive': simple_extractive_summary(text),
-            'abstractive': f"Summary of content covering: {', '.join(key_phrases[:5])}"
+            'abstractive': f"Summary of content covering: {', '.join(key_phrases[:Config.AZURE_FALLBACK_SUMMARY_TOPICS if hasattr(Config, 'AZURE_FALLBACK_SUMMARY_TOPICS') else 5])}"
         }
         
         return {
