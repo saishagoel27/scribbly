@@ -115,7 +115,7 @@ class GeminiFlashcardGenerator:
         cleaned = re.sub(r'\s+', ' ', text)
         cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
         cleaned = cleaned.strip()
-        max_words = 1000
+        max_words = Config.FLASHCARD_MAX_INPUT_WORDS if hasattr(Config, "FLASHCARD_MAX_INPUT_WORDS") else 1000
         words = cleaned.split()
         if len(words) > max_words:
             first_part = words[:int(max_words * 0.7)]
@@ -125,7 +125,7 @@ class GeminiFlashcardGenerator:
     
     def _create_flashcard_prompt(self, text: str, params: Dict) -> str:
         """Create effective prompt for Gemini AI"""
-        num_cards = params.get('num_flashcards', 10)
+        num_cards = params.get('num_flashcards', Config.DEFAULT_FLASHCARD_COUNT)
         difficulty = params.get('difficulty_focus', 'Mixed (Recommended)')
         key_phrases = params.get('key_phrases', [])
         difficulty_instructions = {
@@ -137,7 +137,7 @@ class GeminiFlashcardGenerator:
         difficulty_instruction = difficulty_instructions.get(difficulty, difficulty_instructions['Mixed (Recommended)'])
         key_phrases_text = ""
         if key_phrases:
-            key_phrases_text = f"\n\nKey concepts to focus on: {', '.join(key_phrases[:10])}"
+            key_phrases_text = f"\n\nKey concepts to focus on: {', '.join(key_phrases[:Config.MAX_KEY_PHRASES])}"
         prompt = f"""
 You are an expert educational content creator. Create {num_cards} high-quality flashcards from the following study material.
 
@@ -239,7 +239,7 @@ Generate exactly {num_cards} flashcards now:
     def _create_fallback_flashcards(self, text: str, params: Dict) -> Dict:
         """Create simple flashcards when Gemini is unavailable"""
         try:
-            num_cards = min(params.get('num_flashcards', 10), 8)
+            num_cards = min(params.get('num_flashcards', Config.DEFAULT_FLASHCARD_COUNT), 8)
             return create_basic_flashcards(text, num_cards)
         except Exception as e:
             logger.error(f"Fallback flashcard creation error: {e}")
@@ -250,7 +250,7 @@ Generate exactly {num_cards} flashcards now:
     
     def generate_fallback_flashcards(self, text: str) -> Dict:
         """Simple public fallback method for external use"""
-        return self._create_fallback_flashcards(text, {'num_flashcards': 5})
+        return self._create_fallback_flashcards(text, {'num_flashcards': Config.DEFAULT_FLASHCARD_COUNT})
 
 # Create global instance
 gemini_generator = GeminiFlashcardGenerator()
