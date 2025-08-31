@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import '../styles/globals.css';
-import '../styles/components.css';
+import './globals.css';
+import './components.css';
 
 // Import all real components
-import UploadPage from '../pages/UploadPage';
-import ConfigurePage from '../pages/ConfigurePage';
-import ProcessingPage from '../pages/ProcessingPage';
-import StudyPage from '../pages/StudyPage';
+import UploadPage from './pages/UploadPage.tsx';
+import ConfigurePage from './pages/ConfigurePage.tsx';
+import ProcessingPage from './pages/ProcessingPage.tsx';
+import StudyPage from './pages/StudyPage.tsx';
 
 // Types
 interface FileData {
