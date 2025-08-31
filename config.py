@@ -3,10 +3,10 @@ import logging
 from typing import Dict, List, Tuple, Optional
 from dotenv import load_dotenv
 
-# Set up logging for configuration issues
+# Logging for configuration issues
 logger = logging.getLogger(__name__)
 
-# Safely load environment variables
+# Safely loaded environment variables
 try:
     load_dotenv()
     logger.info("Environment variables loaded successfully")
@@ -39,10 +39,10 @@ class Config:
     # Processing Configuration
     class ProcessingLimits:
         """Centralized processing limits with business justification"""
-        CHUNK_SIZE_DEFAULT = 4000        # Safe for most APIs (Azure 5KB limit)
+        CHUNK_SIZE_DEFAULT = 4000        # (Azure 5KB limit)
         SUMMARY_SENTENCES_MAX = 5        # Optimal summary length for study
         KEY_PHRASES_MAX = 15             # Good balance for flashcard generation
-        FLASHCARD_INPUT_MAX_WORDS = 1000 # Prevent API token limit issues
+        FLASHCARD_INPUT_MAX_WORDS = 1000 # Prevents API token limit issues
     
     @classmethod
     def _safe_int_from_env(cls, key: str, default: int) -> int:
@@ -55,7 +55,7 @@ class Config:
             logger.warning(f"Invalid {key} in environment, using default: {default}")
             return default
     
-    # Initialize calculated values safely
+    # Initializes calculated values safely
     MAX_FILE_SIZE_MB = _safe_int_from_env.__func__(None, 'MAX_FILE_SIZE_MB', 10)
     MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
     
