@@ -61,7 +61,7 @@ class AzureDocumentProcessor:
             if progress_callback:
                 progress_callback("📄 Analyzing document content...", 0.3)
 
-            # Use read model for text extraction
+            # Using read model for text extraction
             poller = client.begin_analyze_document(
                 "prebuilt-read", 
                 file_bytes,
@@ -76,7 +76,7 @@ class AzureDocumentProcessor:
             if progress_callback:
                 progress_callback("✅ Extracting text content...", 0.9)
 
-            # Extract text content
+            # Extracting text content
             extracted_text = ""
             if result.content:
                 extracted_text = result.content
@@ -90,8 +90,8 @@ class AzureDocumentProcessor:
             return {
                 "extracted_text": extracted_text,
                 "word_count": word_count,
-                "confidence_score": 0.95,  # Reasonable default
-                "processing_time": "5-15 seconds",
+                "confidence_score": 0.95,  
+                "processing_time": "5-15 seconds",  
                 "method": "azure_document_intelligence"
             }
 
