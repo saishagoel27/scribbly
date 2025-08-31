@@ -5,6 +5,8 @@ import './styles/components.css';
 
 // Import the UploadPage component 
 import UploadPage from '../pages/UploadPage';
+import ConfigurePage from '../pages/ConfigurePage'; 
+import ProcessingPage from '../pages/ProcessingPage';
 
 // Types
 interface FileData {
