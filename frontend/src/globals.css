@@ -448,7 +448,7 @@ body {
   font-weight: 700;
 }
 
-/* === MAIN CONTENT === */
+/* MAIN CONTENT */
 .main-content {
   flex: 1;
   padding: var(--space-8) 0;
