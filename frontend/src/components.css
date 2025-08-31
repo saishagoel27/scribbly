@@ -48,7 +48,7 @@
   animation: fadeInUp 0.8s ease-out 0.2s both;
 }
 
-/* === SOPHISTICATED UPLOAD SECTION === */
+/* UPLOAD SECTION */
 .upload-section {
   display: flex;
   flex-direction: column;
