@@ -70,71 +70,89 @@ const ProcessingPage: React.FC<ProcessingPageProps> = ({
     onStartProcessing();
     setProcessingError(null);
     setProcessingStep('extracting');
-    setProcessingProgress(0);
+    setProcessingProgress(10);
 
     try {
-      // Step 1: Start processing
-      setProcessingStep('extracting');
-      setProcessingProgress(25);
-
+      // ✅ FIXED: Proper FormData creation and sending
       const formData = new FormData();
       formData.append('file', fileData.file);
-      formData.append('studyConfig', JSON.stringify(studyConfig));
+      formData.append('study_mode', studyConfig.studyMode);
+      
+      if (studyConfig.flashcardCount) {
+        formData.append('flashcard_count', studyConfig.flashcardCount.toString());
+      }
+      if (studyConfig.difficultyFocus) {
+        formData.append('difficulty_focus', studyConfig.difficultyFocus);
+      }
 
-      // Call your backend API
-      const response = await axios.post('/api/process', {
-        fileData: {
-          filename: fileData.metadata.filename,
-          size: fileData.metadata.size,
-          type: fileData.metadata.type
+      setProcessingStep('analyzing');
+      setProcessingProgress(25);
+
+      // ✅ FIXED: Correct endpoint and FormData
+      const response = await axios.post('/process', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
         },
-        studyConfig
-      }, {
         timeout: 300000, // 5 minute timeout for AI processing
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
-            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setProcessingProgress(Math.min(progress / 4, 25)); // First 25%
+            const uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setProcessingProgress(25 + Math.round(uploadProgress * 0.25)); // 25% to 50%
           }
         }
       });
 
-      // Step 2: Analyzing
-      setProcessingStep('analyzing');
-      setProcessingProgress(50);
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate analysis time
-
-      // Step 3: Generating
       setProcessingStep('generating');
       setProcessingProgress(75);
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Simulate generation time
 
-      // Step 4: Finalizing
-      setProcessingStep('finalizing');
-      setProcessingProgress(100);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // ✅ FIXED: Process the actual response from your backend
+      if (response.data.status === 'success') {
+        setProcessingStep('finalizing');
+        setProcessingProgress(100);
 
-      // Process the response from your backend
-      const results: ProcessingResults = {
-        flashcards: response.data.flashcards || [],
-        summary: response.data.summary || null,
-        processingMetrics: {
-          processingTime: response.data.processingTime || 45,
-          confidence: response.data.confidence || 0.92,
-          method: response.data.method || 'hybrid'
-        },
-        timestamp: new Date().toISOString()
-      };
+        const results: ProcessingResults = {
+          flashcards: response.data.flashcards || [],
+          summary: response.data.summary || null,
+          processingMetrics: {
+            processingTime: response.data.processing_time || 45,
+            confidence: response.data.confidence || 0.92,
+            method: response.data.method || 'hybrid'
+          },
+          timestamp: new Date().toISOString()
+        };
 
-      onProcessingComplete(results);
+        // Small delay to show completion
+        setTimeout(() => {
+          onProcessingComplete(results);
+        }, 1000);
+
+      } else {
+        throw new Error(response.data.error || 'Processing failed');
+      }
 
     } catch (error: any) {
       console.error('Processing failed:', error);
-      setProcessingError(
-        error.response?.data?.detail || 
-        error.message || 
-        'Processing failed. Please try again.'
-      );
+      
+      // ✅ FIXED: Better error handling
+      let errorMessage = 'Processing failed. Please try again.';
+      
+      if (error.code === 'ECONNABORTED') {
+        errorMessage = 'Processing timed out. Your file may be too large or complex.';
+      } else if (error.response?.status === 413) {
+        errorMessage = 'File too large. Please try a smaller file.';
+      } else if (error.response?.status === 422) {
+        errorMessage = 'File format not supported or corrupted.';
+      } else if (error.response?.status === 500) {
+        errorMessage = 'Server error. Our AI services may be temporarily unavailable.';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setProcessingError(errorMessage);
       
       // Reset processing state on error
       setProcessingStep('ready');
