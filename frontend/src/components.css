@@ -776,7 +776,7 @@
   }
 }
 
-/* === ACCESSIBILITY & INTERACTIONS === */
+/* ACCESSIBILITY & INTERACTIONS */
 @media (prefers-reduced-motion: reduce) {
   .upload-dropzone.dragging,
   .tip-item:hover,
