@@ -695,7 +695,7 @@
   line-height: 1.5;
 }
 
-/* === RESPONSIVE DESIGN === */
+/* RESPONSIVE DESIGN */
 @media (max-width: 768px) {
   .page-title {
     font-size: var(--text-4xl);
