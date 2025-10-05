@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Scribbly API", description="AI Study Helper Backend")
 
-# Enable CORS for React frontend
+# Enabling CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # React dev server
